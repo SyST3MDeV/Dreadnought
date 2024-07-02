@@ -1,0 +1,10 @@
+feng shui:
+Load asset
+Start game NO listen
+set loadout
+wait for match to FULLY start (should play warp in sequence)
+listen
+connect on client
+set loadout
+force spawn
+profit (?)
