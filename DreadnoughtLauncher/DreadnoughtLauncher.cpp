@@ -13,8 +13,10 @@ int main()
     si.cb = sizeof(si);
     ZeroMemory(&pi, sizeof(pi));
 
+    char cmdArgs[] = ".\\DreadGame\\DreadGame\\Binaries\\Win64\\DreadGame-Win64-Shipping.exe -log";
+
     CreateProcessA(".\\DreadGame\\DreadGame\\Binaries\\Win64\\DreadGame-Win64-Shipping.exe",
-        nullptr,
+        cmdArgs,
         NULL,
         NULL,
         FALSE,
