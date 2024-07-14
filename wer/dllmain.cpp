@@ -4,7 +4,7 @@
 #include <thread>
 
 void DreadnoughtInjectionThread() {
-    Sleep(10000);
+    Sleep(25000);
     LoadLibraryA("Dreadnought.dll");
 }
 

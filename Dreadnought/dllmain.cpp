@@ -5,6 +5,7 @@
 
 #include <fstream>
 #include <string>
+#include <thread>
 
 using namespace CG;
 
@@ -39,6 +40,15 @@ void ListAllObjectsOfType() {
 }
 
 /*
+	Unreal Engine uses it's own allocator, which will crash when attempting to deallocate memory that dosen't belong to it. Instead of using "new" in our code, we need to
+	use the native Unreal Engine allocator, which this function calls.
+*/
+void* FMemoryMalloc(size_t size) {
+	//0C06B70
+	return reinterpret_cast<void * (*)(size_t size, uint32_t alignment)>(global_baseaddress + 0x0C06B70)(size, 0);
+}
+
+/*
 	Equivalent to StaticLoad<T> in UE4, used to load ship loadout BPs
 */
 UObject* StaticLoadClass(UClass* ObjectClass, UObject* InOuter, const TCHAR* InName) {
@@ -46,7 +56,6 @@ UObject* StaticLoadClass(UClass* ObjectClass, UObject* InOuter, const TCHAR* InN
 	//0D78110
 	return reinterpret_cast<UObject* (*)(UClass * ObjectClass, UObject * InOuter, const TCHAR * InName, const TCHAR * Filename, int LoadFlags, UPackageMap * Sandbox, bool bAllowObjectReconciliation)>(global_baseaddress + 0x0D78110)(ObjectClass, InOuter, InName, nullptr, 0, nullptr, false);
 }
-
 
 /*
 	Startup IMGUI
@@ -72,9 +81,9 @@ typedef void* (__thiscall* ProcessEvent)(UObject*, class UFunction*, void*);
 
 ProcessEvent origProcessEvent = nullptr;
 
-bool flipTeams = false;
+static bool flipTeams = false;
 
-bool iAmServer = false;
+bool interceptPostLogin = false;
 
 bool procMapLoad = false;
 
@@ -86,6 +95,39 @@ std::string serverIP = "";
 
 bool launchTutorial = false;
 
+bool forceHUD = false;
+
+static AYPlayerController* pcToInit = nullptr;
+
+bool initPC = false;
+
+/*
+	Delay the setup of the player controller to give the game time to do it's setup first
+*/
+void InitPlayerController(AYPlayerController* pc) {
+	Sleep(10 * 1000);
+
+	pcToInit = pc;
+
+	initPC = true;
+}
+
+std::string loadoutString = "";
+
+/*
+	Loads the provided loadout class to memory
+*/
+void LoadLoadouts() {
+	std::wstring wLoadoutString(loadoutString.begin(), loadoutString.end());
+
+	StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, wLoadoutString.c_str());
+}
+
+
+int numPlayersConnected = 0;
+
+std::vector<AYPlayerController*> spawnedPlayerControllers = std::vector<AYPlayerController*>();
+
 /*
 	ProcessEvent is the function that UFunctions pass through to be executed.
 	This hook serves two purposes:
@@ -94,23 +136,52 @@ bool launchTutorial = false;
 */
 void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
 #ifdef SERVER_BUILD
-	if (iAmServer && function->GetFullName().find("PostLogin") != std::string::npos) { //A new player has connected, set their loadout!
-		AGameMode_K2_PostLogin_Params* cast_params = ((AGameMode_K2_PostLogin_Params*)params);
+	if (initPC) { //Init a new player controller by setting it's loadout and respawning it!
+		initPC = false;
 
-		UYShipLoadoutHero* loadoutToApply = getLastOfType< UYShipLoadoutHero>();
+		std::wstring wLoadoutString(loadoutString.begin(), loadoutString.end());
 
-		((AYPlayerController*)cast_params->NewPlayer)->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
+		StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, wLoadoutString.c_str());
 
-		if (!flipTeams) {
-			((AYPlayerController*)cast_params->NewPlayer)->SetTeam(EYTeam::YT_TEAM2);
+		Sleep(2 * 1000);
+
+		AYPlayerController* pc = pcToInit;
+
+		UYShipLoadout* loadoutToApply = nullptr;
+
+		for (UYShipLoadout* cmpLoadout : UObject::FindObjects< UYShipLoadout>()) {
+			if (cmpLoadout->GetFullName().find(loadoutString.substr(loadoutString.find_last_of("/") + 1)) != std::string::npos) {
+				loadoutToApply = cmpLoadout;
+			}
+		}
+
+		pc->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
+		((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class); //This might not do anything outside of Standalone, TODO: check this in the future
+
+		if (!flipTeams) { //Set every player to the opposite team so our matches are something resembling balanced!
+			pc->SetTeam(EYTeam::YT_TEAM2);
 		}
 		else {
-			((AYPlayerController*)cast_params->NewPlayer)->SetTeam(EYTeam::YT_TEAM1);
+			pc->SetTeam(EYTeam::YT_TEAM1);
 		}
-		
+
 		flipTeams = !flipTeams;
 
-		((AYPlayerController*)cast_params->NewPlayer)->ServerRestartPlayer();
+		pc->ServerRestartPlayer();
+
+		Sleep(5 * 1000);
+
+		spawnedPlayerControllers.push_back(pc); //Allow the respawn thread to respawn this playercontroller when it dies
+	}
+
+	if (interceptPostLogin && function->GetFullName().find("PostLogin") != std::string::npos) { //Kick off the player controller init sequence
+		AGameMode_K2_PostLogin_Params* cast_params = ((AGameMode_K2_PostLogin_Params*)params);
+
+		AYPlayerController* pc = (AYPlayerController*)cast_params->NewPlayer;
+
+		std::thread t(InitPlayerController, pc);
+
+		t.detach();
 	}
 
 	if (procMapLoad) { //Load the map on the server, needs to run in the main game thread
@@ -120,17 +191,46 @@ void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
 
 		getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), wMapCommand.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
 	}
+
+	//In Listen play, calling ClientSetPlayerRestrictions on the local player will result in a stack overflow
+	if (function->GetFullName().find("ClientSetPlayerRestrictions") != std::string::npos && object == (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController) {
+		return nullptr;
+	}
+	//Hacky way to force the HUD and disabled features into ingame mode
+	else if (function->GetFullName().find("ClientSetPlayerRestrictions") != std::string::npos) {
+		AYPlayerController_ClientSetPlayerRestrictions_Params* parsedParams = (AYPlayerController_ClientSetPlayerRestrictions_Params*)params;
+
+		parsedParams->bRestrictAbilities = false;
+		parsedParams->hudState = EYHudState::EHS_HUD;
+		parsedParams->bRestrictChat = false;
+		parsedParams->bRestrictEnergyWheel = false;
+		parsedParams->bRestrictMovements = false;
+		parsedParams->bRestrictOfficerNotifications = false;
+		parsedParams->bRestrictScoringSystem = false;
+		parsedParams->bRestrictSwitchWeapons = false;
+		parsedParams->bRestrictWeapons = false;
+		parsedParams->bSpectate = false;
+		parsedParams->restrictAbility1 = false;
+		parsedParams->restrictAbility2 = false;
+		parsedParams->restrictAbility3 = false;
+		parsedParams->restrictAbility4 = false;
+		parsedParams->restrictCamera = EYCameraRestrictionType::EYCRT_AllowCamera;
+		parsedParams->restrictShortCommands = false;
+		parsedParams->specificMovementRestrictions = FYSpecificMovementControlRestrictions();
+	}
 #endif
 
 #ifndef SERVER_BUILD
 	if (connectToServer) { //Connect to the server, needs to run in the main game thread
 		connectToServer = false;
 
-		std::wstring wServerIP(mapCommand.begin(), mapCommand.end());
+		forceHUD = true;
+
+		std::wstring wServerIP(serverIP.begin(), serverIP.end());
 
 		std::wstring wServerConnectCommand = L"open ";
 
-		std::wstring wFinalCommand = wServerIP + wServerConnectCommand;
+		std::wstring wFinalCommand = wServerConnectCommand.append(wServerIP);
 
 		getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), wFinalCommand.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
 	}
@@ -156,7 +256,38 @@ void Listen() {
 	FURL url = FURL();
 	url.Port = 7777;
 	reinterpret_cast<UObject* (*)(UWorld * world, FURL & inURL)>(global_baseaddress + 0x1CDBB20)(*UWorld::GWorld, url);
-	iAmServer = true;
+	interceptPostLogin = true;
+}
+
+/*
+	Check if the provided playercontroller has been setup by the PostLogin hook yet
+*/
+bool PCIsSpawned(AYPlayerController* cmp) {
+	for (auto cmp2 : spawnedPlayerControllers) {
+		if (cmp2 == cmp) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/*
+	Iterate through all playercontrollers, and spam restart them. ServerRestartPlayer does nothing if the player is already spawned, so this is safe to call without
+	checking if the player is dead or not.
+*/
+void RespawnThread() {
+	while (true) {
+		if ((*UWorld::GWorld)->NetDriver) {
+			for (int i = 0; i < (*UWorld::GWorld)->NetDriver->ClientConnections.Count(); i++) {
+				AYPlayerController* pc = (AYPlayerController*)(*UWorld::GWorld)->NetDriver->ClientConnections[i]->PlayerController;
+				if (pc && PCIsSpawned(pc)) {
+					pc->ServerRestartPlayer();
+				}
+			}
+			Sleep(5 * 1000);
+		}
+	}
 }
 
 bool init = false;
@@ -198,14 +329,138 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 	if (menuEnabled) {
 		ImGui::Begin("Dreadnought (F1 to show/hide)", &menuEnabled, ImGuiWindowFlags_AlwaysAutoResize);
 
-		ImGui::InputText("Server IP", &serverIP);
-		ImGui::SameLine();
+		if (ImGui::BeginTabBar("MenuSelect")) {
+			/*
+			if (ImGui::BeginTabItem("Singleplayer")) {
+				static int numBotsTeamOne = 0;
+				static int numBotsTeamTwo = 0;
 
-		if (ImGui::Button("Connect"))
-			connectToServer = true;
+				static int difficulty = 0;
+				const char* difficultyNames[3] = { "Recruit", "Veteran", "Legendary" };
 
-		if (ImGui::Button("Launch Tutorial"))
-			launchTutorial = true;
+				const char* mapNames[12] = { "", };
+
+				ImGui::SliderInt("Num Friendly Bots", &numBotsTeamOne, 0, 7);
+				ImGui::SliderInt("Num Enemy Bots", &numBotsTeamTwo, 0, 8);
+				ImGui::Combo("Bot Difficulty", &difficulty, difficultyNames, 3);
+
+				ImGui::EndTabItem();
+			}
+			*/
+			if (ImGui::BeginTabItem("Tutorial")) {
+				if (ImGui::Button("Launch Tutorial"))
+					launchTutorial = true;
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem("Multiplayer (BETA)")) {
+				ImGui::InputText("Server IP", &serverIP);
+				ImGui::SameLine();
+
+				if (ImGui::Button("Connect"))
+					connectToServer = true;
+				ImGui::EndTabItem();
+			}
+			/*
+			if (ImGui::BeginTabItem("Debug")) {
+				if (ImGui::Button("Force Loadout")) {
+					for (AYPlayerController* pc : UObject::FindObjects<AYPlayerController>()) {
+						if (pc && pc->GetFullName().find("Default") == std::string::npos) { // && pc != (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController
+							UYShipLoadout* loadoutToApply = getLastOfType< UYShipLoadout>();
+
+							((AYPlayerController*)pc)->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
+							((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+						}
+					}
+				}
+
+				if (ImGui::Button("Enable AI Spawn")) {
+					((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_enableSpawnAI = true;
+				}
+
+				if (ImGui::Button("Disable AI Spawn")) {
+					((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_enableSpawnAI = false;
+				}
+
+				if (ImGui::Button("Load Loadout")) {
+					StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, L"/Game/Generic/Loadouts/Precast/T5/VH_AssaultLight_PrecastLoadout_T5_BP");
+				}
+
+				if (ImGui::Button("InstaStartMatch")) {
+					((AYGameState*)(*UWorld::GWorld)->AuthorityGameMode->GameState)->SetRemainingTime(1);
+				}
+
+				if (ImGui::Button("Listen")) {
+					Listen();
+				}
+
+				if (ImGui::Button("SetRestrictions")) {
+					for (AYPlayerController* pc : UObject::FindObjects<AYPlayerController>()) {
+						if (pc->GetFullName().find("Default") == std::string::npos && pc != (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController) { //
+							pc->ClientSetPlayerRestrictions(false, EYCameraRestrictionType::EYCRT_AllowCamera, false, false, false, false, false, false, false, false, EYHudState::EHS_HUD, false, false, false, false, false, FYSpecificMovementControlRestrictions());
+						}
+					}
+				}
+
+				if (ImGui::Button("RestartAllPlayers")) {
+					StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, L"/Game/Generic/Loadouts/Precast/T5/VH_AssaultLight_PrecastLoadout_T5_BP");
+
+					for (AYPlayerController* pc : UObject::FindObjects<AYPlayerController>()) {
+						if (pc->GetFullName().find("Default") == std::string::npos) { // && pc != (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController
+							if (!pc->GetLoadoutManager()->m_activeLoadout) {
+								UYShipLoadout* loadoutToApply = nullptr;
+
+								for (UYShipLoadout* cmpLoadout : UObject::FindObjects< UYShipLoadout>()) {
+									if (cmpLoadout->GetFullName().find("VH_AssaultLight_PrecastLoadout_T5_BP") != std::string::npos) {
+										loadoutToApply = cmpLoadout;
+									}
+								}
+
+								pc->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
+								pc->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+							}
+							pc->ServerRestartPlayer();
+						}
+					}
+				}
+
+				if (ImGui::Button("AI Team")) {
+					StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Vet");
+
+					Sleep(1 * 1000);
+
+					ListAllObjectsOfType< UYNPCPawnData>();
+
+					((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetCombatManager()->m_NPCSet = getLastOfType< UYNPCPawnData>();
+					((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetCombatManager()->m_isNPCSetLoaded = true;
+
+					UYNPCPawnData* pawnData = getLastOfType< UYNPCPawnData>();
+
+					for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_npcPlayers.Count(); i++) {
+						TArray<FName>* shipIDs = (TArray<FName>*)FMemoryMalloc(sizeof(TArray<FName>));
+
+						shipIDs->_data = (FName*)FMemoryMalloc(sizeof(FName) * pawnData->m_PawnsData.Count());
+						shipIDs->_count = pawnData->m_PawnsData.Count();
+						shipIDs->_max = pawnData->m_PawnsData.Count();
+
+						for (int j = 0; j < pawnData->m_PawnsData.Count(); j++) {
+							(*shipIDs)[j] = pawnData->m_PawnsData[j].m_shipId;
+						}
+
+						((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_npcPlayers[i].m_npcSpawnIDs = *shipIDs;
+					}
+
+					for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+						((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_LEGENDARY;
+					}
+
+					((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->SetTeamSizeAI(EYTeam::YT_TEAM1, 6);
+					((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->SetTeamSizeAI(EYTeam::YT_TEAM2, 6);
+				}
+				ImGui::EndTabItem();
+			}
+			*/
+			ImGui::EndTabBar();
+		}
 
 		ImGui::End();
 	}
@@ -261,6 +516,17 @@ HRESULT hkResizeBuffers(IDXGISwapChain* pThis, UINT BufferCount, UINT Width, UIN
 }
 
 /*
+	This stub function prevents the hud from being created on the listen player. Without this, the server will crash on any player's death.
+*/
+void* origJustReturn = nullptr;
+
+void* JustReturnWhatWeWereGoingToReturn(void* param1, void* param2) {
+	return nullptr;
+}
+
+//1CDB7C0
+
+/*
 	Hook ProcessEvent and set the global base address variable
 */
 void InitHooking() {
@@ -275,6 +541,16 @@ void InitHooking() {
 	MH_CreateHook(hookRef, ProcessEventHook, reinterpret_cast<LPVOID*>(&origProcessEvent));
 
 	MH_EnableHook(hookRef);
+
+#ifdef SERVER_BUILD
+	void* hookRef2 = (void*)(global_baseaddress + 0x055B050);
+
+	MH_CreateHook(hookRef2, JustReturnWhatWeWereGoingToReturn, reinterpret_cast<LPVOID*>(&origJustReturn));
+
+	MH_EnableHook(hookRef2);
+#endif // !SERVER_BUILD
+
+	
 }
 
 /*
@@ -298,17 +574,6 @@ void InitConsole() {
 	freopen_s(&fDummy, "CONOUT$", "w", stdout);
 }
 
-std::string loadoutString = "";
-
-/*
-	Loads the provided loadout class to memory
-*/
-void LoadLoadouts() {
-	std::wstring wLoadoutString(loadoutString.begin(), loadoutString.end());
-
-	StaticLoadClass(UYShipLoadoutHero::StaticClass(), nullptr, wLoadoutString.c_str());
-}
-
 /*
 	Loads server configuration from cfg.txt in the Win64 folder
 */
@@ -320,18 +585,91 @@ void LoadConfiguration() {
 }
 
 /*
+*	Sets the loadout of the local player, allowing them to spawn when the game starts
+*/
+void ForceSpawnLocalPlayer() {
+	std::wstring wLoadoutString(loadoutString.begin(), loadoutString.end());
+
+	StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, wLoadoutString.c_str());
+
+	Sleep(2 * 1000);
+
+	UYShipLoadout* loadoutToApply = getLastOfType< UYShipLoadout>();
+
+	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
+	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+}
+
+/*
+	Skips the loadout selection part of the match
+*/
+void ForceStartMatch() {
+	((AYGameState*)(*UWorld::GWorld)->AuthorityGameMode->GameState)->SetRemainingTime(1);
+}
+
+/*
+	When running in listen mode, only players that are actively being rendered by the server are able to play. This code forces the local listen player
+	to view a new camera above the map, and extends the render distance to ensure that all players are always rendered.
+*/
+void InitDesyncFix() {
+	for (auto actor : UObject::FindObjects<URendererSettings>()) {
+		actor->bOcclusionCulling = false;
+	}
+
+	ListAllObjectsOfType<ACameraActor>();
+
+	FViewTargetTransitionParams params = FViewTargetTransitionParams();
+
+	params.BlendTime = 0.0f;
+
+	FTransform spawnTransform = FTransform();
+
+	spawnTransform.Translation = FVector(0, 0, 999999.0f);
+	spawnTransform.Rotation = FQuat();
+	spawnTransform.Rotation.X = 0;
+	spawnTransform.Rotation.W = -0.7071068;
+	spawnTransform.Rotation.Y = -0.7071068f;
+	spawnTransform.Rotation.Z = 0;
+
+	ACameraActor* newCam = (ACameraActor*)getLastOfType<UGameplayStatics>()->STATIC_BeginSpawningActorFromClass((*UWorld::GWorld), ACameraActor::StaticClass(), spawnTransform, true, nullptr);
+
+	ListAllObjectsOfType<ACameraActor>();
+
+	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->ClientSetViewTarget(newCam, params);
+
+	getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), L"r.SkipVehicleUpdateDistance 999999999999999999999999", (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
+}
+
+/*
+	Starts up the respawn thread
+*/
+void InitRespawnThread() {
+	std::thread t(RespawnThread);
+
+	t.detach();
+}
+
+/*
 	Runs server buisness logic
 */
 void ServerStartCallbacks() {
 	LoadConfiguration();
 
-	LoadLoadouts();
-	
 	procMapLoad = true;
 
-	Sleep(125000);
+	Sleep(60 * 1000);
+
+	ForceSpawnLocalPlayer();
+
+	ForceStartMatch();
+
+	Sleep(15 * 1000);
+
+	InitDesyncFix();
 
 	Listen();
+
+	InitRespawnThread();
 }
 
 /*
@@ -341,20 +679,15 @@ DWORD WINAPI DreadnoughtMainThread(LPVOID lpReserved)
 {
 	InitSdk();
 
-#ifdef SERVER_BUILD
-	InitConsole();
-#endif
-
 	InitHooking();
+
+	InitConsole();
+
+	InitGameConsole();
 
 #ifdef SERVER_BUILD
 	ServerStartCallbacks();
 #endif // SERVER_BUILD
-
-
-#ifdef DEBUG
-	InitGameConsole();
-#endif
 
 #ifndef SERVER_BUILD
 	bool init_hook = false;
@@ -378,6 +711,7 @@ DWORD WINAPI DreadnoughtMainThread(LPVOID lpReserved)
 		}
 	}
 #endif
+
 	return TRUE;
 }
 

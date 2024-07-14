@@ -2,6 +2,12 @@
 Credits: gwog :3 (main dev), CorrM (Cheat Gear SDK Generator), nohbdy (DLL shim generation script)
 ## What is this?
 This is a c++ project that allows users to play the game Dreadnought without a connection to the (now deactivated) official servers. You must already own the game on Steam to use this patch. This is heavily WIP.
+## Currently Supported
+- Tutorial
+- Multiplayer TDM, only MP_DansMap_P tested, everyone will use the same loadout
+## Known Issues
+- Energy wheel will not function after a death
+- If you respawn while the death recap is still onscreen, it will get stuck onscreen
 ## How to install (Client)
 - Install the latest version of Dreadnought on Steam
 - Go to the latest release on the right side of the GitHub page, and download the "Client.zip" file.

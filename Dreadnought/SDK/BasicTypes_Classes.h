@@ -21,7 +21,7 @@ namespace CG
 	template<typename T>
 	class TArray
 	{
-	private:
+	public:
 		T*                                                         _data;                                                   // 0x0000(0x0000)
 		int32_t                                                    _count;                                                  // 0x0000(0x0000)
 		int32_t                                                    _max;                                                    // 0x0000(0x0000)
