@@ -4,9 +4,8 @@ Credits: gwog :3 (main dev), CorrM (Cheat Gear SDK Generator), nohbdy (DLL shim 
 This is a c++ project that allows users to play the game Dreadnought without a connection to the (now deactivated) official servers. You must already own the game on Steam to use this patch. This is heavily WIP.
 ## Currently Supported
 - Tutorial
-- Multiplayer TDM, only MP_DansMap_P tested, everyone will use the same loadout
+- Multiplayer TDM, everyone will use the same loadout
 ## Known Issues
-- Energy wheel will not function after a death
 - If you respawn while the death recap is still onscreen, it will get stuck onscreen
 ## How to install (Client)
 - Install the latest version of Dreadnought on Steam
@@ -27,13 +26,13 @@ This is a c++ project that allows users to play the game Dreadnought without a c
 	- Press the "Connect" button in the overlay
 ## How to install (Server)
 - Install the latest version of Dreadnought on Steam
-- Go to the latest release on the right side of the GitHub page, and download the “Server.zip” file.
+- Go to the latest release on the right side of the GitHub page, and download the ï¿½Server.zipï¿½ file.
 - Extract the Server.zip file
 - Right click on Dreadnought in Steam
 - Select Manage > Browse Local Files
-- In the root game directory, replace the “DreadnoughtLauncher.exe” file with the one from the client zip file
+- In the root game directory, replace the ï¿½DreadnoughtLauncher.exeï¿½ file with the one from the client zip file
 - Navigate to DreadGame > DreadGame > Binaries > Win64
-- Add the “Dreadnought.dll” and “wer.dll” files to the Win64 folder
+- Add the ï¿½Dreadnought.dllï¿½ and ï¿½wer.dllï¿½ files to the Win64 folder
 - Create a file named "cfg.txt" in the Win64 folder
 	- On the first line, put "open " (ensure there's a space after open), and the name of the map you'd like to open
 	- On the second line, put the path to the loadout asset you'd like to have all players use
