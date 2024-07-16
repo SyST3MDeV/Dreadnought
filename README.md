@@ -30,12 +30,15 @@ This is a c++ project that allows users to play the game Dreadnought without a c
 - Extract the Server.zip file
 - Right click on Dreadnought in Steam
 - Select Manage > Browse Local Files
-- In the root game directory, replace the �DreadnoughtLauncher.exe� file with the one from the client zip file
+- In the root game directory, replace the DreadnoughtLauncher.exe file with the one from the client zip file
 - Navigate to DreadGame > DreadGame > Binaries > Win64
-- Add the �Dreadnought.dll� and �wer.dll� files to the Win64 folder
+- Add the Dreadnought.dll and wer.dll files to the Win64 folder
 - Create a file named "cfg.txt" in the Win64 folder
 	- On the first line, put "open " (ensure there's a space after open), and the name of the map you'd like to open
 	- On the second line, put the path to the loadout asset you'd like to have all players use
+	- On the third line, put the number of bots to spawn on team one (8 max)
+	- On the fourth line, put the number of bots to spawn on team two (8 max)
+	- On the fifth line, put the bot difficulty from 0-2, where 0 is easiest and 2 is hardest
 - Ensure port 7777 is open and forwarded
 - Run the game in Steam
 - Click "OK" to the EasyAntiCheat popup

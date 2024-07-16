@@ -108,10 +108,171 @@ void LoadLoadouts() {
 	StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, wLoadoutString.c_str());
 }
 
+/*
+	Load the sepcified loadout for singleplayer, and force starts the match
+*/
+void CompleteSingleplayerMatchSetup(std::string loadoutString) {
+	AYPlayerController* pc = (AYPlayerController*)((*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
+
+	std::wstring wLoadoutString(loadoutString.begin(), loadoutString.end());
+
+	StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, wLoadoutString.c_str());
+
+	UYShipLoadout* loadoutToApply = nullptr;
+
+	for (UYShipLoadout* cmpLoadout : UObject::FindObjects< UYShipLoadout>()) {
+		if (cmpLoadout->GetFullName().find(loadoutString.substr(loadoutString.find_last_of("/") + 1)) != std::string::npos) {
+			loadoutToApply = cmpLoadout;
+		}
+	}
+
+	pc->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
+	((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+
+	((AYGameState*)(*UWorld::GWorld)->AuthorityGameMode->GameState)->SetRemainingTime(1);
+}
+
+static std::string singleplayerLoadoutString = "/Game/Generic/Loadouts/Precast/T5/VH_AssaultLight_PrecastLoadout_T5_BP";
+
+/*
+	Sets up singleplayer AI, requires about 30sec of built in delay to ensure all AI pawns spawn
+*/
+void SetupSingleplayerAIThread(int numBotsTeamOne, int numBotsTeamTwo, int difficulty, std::string loadoutString) {
+	Sleep(20 * 1000);
+
+	switch (difficulty) {
+	case 0:
+		StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Rec");
+		for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+			((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_RECRUIT;
+		}
+		break;
+	case 1:
+		StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Vet");
+		for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+			((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_VETERAN;
+		}
+		break;
+	case 2:
+		StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Leg");
+		for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+			((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_LEGENDARY;
+		}
+		break;
+	default:
+		StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Leg");
+		for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+			((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_LEGENDARY;
+		}
+		break;
+	}
+
+	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetCombatManager()->m_NPCSet = getLastOfType< UYNPCPawnData>();
+	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetCombatManager()->m_isNPCSetLoaded = true;
+
+	UYNPCPawnData* pawnData = getLastOfType< UYNPCPawnData>();
+
+	for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_npcPlayers.Count(); i++) {
+		TArray<FName>* shipIDs = (TArray<FName>*)FMemoryMalloc(sizeof(TArray<FName>));
+
+		shipIDs->_data = (FName*)FMemoryMalloc(sizeof(FName) * pawnData->m_PawnsData.Count());
+		shipIDs->_count = pawnData->m_PawnsData.Count();
+		shipIDs->_max = pawnData->m_PawnsData.Count();
+
+		for (int j = 0; j < pawnData->m_PawnsData.Count(); j++) {
+			(*shipIDs)[j] = pawnData->m_PawnsData[j].m_shipId;
+		}
+
+		((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_npcPlayers[i].m_npcSpawnIDs = *shipIDs;
+	}
+
+	((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->SetTeamSizeAI(EYTeam::YT_TEAM1, numBotsTeamOne);
+	((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->SetTeamSizeAI(EYTeam::YT_TEAM2, numBotsTeamTwo);
+
+	((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_enableSpawnAI = true;
+
+	Sleep(30 * 1000);
+
+	CompleteSingleplayerMatchSetup(loadoutString);
+}
+
+/*
+	Sets up multiplayer AI, requires about 30sec of built in delay to ensure all AI pawns spawn
+*/
+void SetupMultiplayerAI(int numBotsTeamOne, int numBotsTeamTwo, int difficulty) {
+	switch (difficulty) {
+	case 0:
+		StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Rec");
+		for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+			((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_RECRUIT;
+		}
+		break;
+	case 1:
+		StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Vet");
+		for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+			((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_VETERAN;
+		}
+		break;
+	case 2:
+		StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Leg");
+		for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+			((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_LEGENDARY;
+		}
+		break;
+	default:
+		StaticLoadClass(UYNPCPawnData::StaticClass(), nullptr, L"/Game/Generic/GameModes/TDM/AIShips_TDM_Leg");
+		for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules.Count(); i++) {
+			((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_aiSpawnTierRules[i].m_aiTier_aiDificultyLevel = EYAILevel::YAIL_LEGENDARY;
+		}
+		break;
+	}
+
+	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetCombatManager()->m_NPCSet = getLastOfType< UYNPCPawnData>();
+	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetCombatManager()->m_isNPCSetLoaded = true;
+
+	UYNPCPawnData* pawnData = getLastOfType< UYNPCPawnData>();
+
+	for (int i = 0; i < ((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_npcPlayers.Count(); i++) {
+		TArray<FName>* shipIDs = (TArray<FName>*)FMemoryMalloc(sizeof(TArray<FName>));
+
+		shipIDs->_data = (FName*)FMemoryMalloc(sizeof(FName) * pawnData->m_PawnsData.Count());
+		shipIDs->_count = pawnData->m_PawnsData.Count();
+		shipIDs->_max = pawnData->m_PawnsData.Count();
+
+		for (int j = 0; j < pawnData->m_PawnsData.Count(); j++) {
+			(*shipIDs)[j] = pawnData->m_PawnsData[j].m_shipId;
+		}
+
+		((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_npcPlayers[i].m_npcSpawnIDs = *shipIDs;
+	}
+
+	((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->SetTeamSizeAI(EYTeam::YT_TEAM1, numBotsTeamOne);
+	((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->SetTeamSizeAI(EYTeam::YT_TEAM2, numBotsTeamTwo);
+
+	((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_enableSpawnAI = true;
+
+	Sleep(30 * 1000);
+}
 
 int numPlayersConnected = 0;
 
 std::vector<AYPlayerController*> spawnedPlayerControllers = std::vector<AYPlayerController*>();
+
+static int numBotsTeamOne = 0;
+static int numBotsTeamTwo = 0;
+static int difficulty = 0;
+static int map = 0;
+
+bool launchSingleplayer = false;
+
+/*
+	Delays the singleplayer setup thread so the map has time to load in
+*/
+void DelaySingleplayerSetupThread(std::string loadoutString) {
+	Sleep(20 * 1000);
+
+	CompleteSingleplayerMatchSetup(loadoutString);
+}
 
 /*
 	ProcessEvent is the function that UFunctions pass through to be executed.
@@ -215,6 +376,29 @@ void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
 
 		getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), L"open S01E00_00_Tutorial_P", (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
 	}
+
+	if (launchSingleplayer) {
+		launchSingleplayer = false;
+
+		std::wstring mapFileNames [10] = { L"MP_Amirani_P", L"MP_DansMap_P", L"MP_Derelict_P", L"MP_Glacier_P", L"MP_Gorge_P", L"MP_Highlands_P", L"MP_Paradise_P", L"MP_Skybridge_P", L"MP_Space01_P", L"MP_Space02_P" };
+
+		std::wstring command = L"open ";
+
+		command = command.append(mapFileNames[map].c_str());
+
+		getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), command.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
+
+		if (numBotsTeamOne > 0 || numBotsTeamTwo > 0) {
+			std::thread t(SetupSingleplayerAIThread, numBotsTeamOne, numBotsTeamTwo, difficulty, singleplayerLoadoutString);
+
+			t.detach();
+		}
+		else {
+			std::thread t(DelaySingleplayerSetupThread, singleplayerLoadoutString);
+
+			t.detach();
+		}
+	}
 #endif // !SERVER_BUILD
 
 
@@ -297,23 +481,23 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 		ImGui::Begin("Dreadnought (F1 to show/hide)", &menuEnabled, ImGuiWindowFlags_AlwaysAutoResize);
 
 		if (ImGui::BeginTabBar("MenuSelect")) {
-			/*
 			if (ImGui::BeginTabItem("Singleplayer")) {
-				static int numBotsTeamOne = 0;
-				static int numBotsTeamTwo = 0;
-
-				static int difficulty = 0;
 				const char* difficultyNames[3] = { "Recruit", "Veteran", "Legendary" };
 
-				const char* mapNames[12] = { "", };
+				const char* mapNames[10] = { "Amirani", "DansMap", "Derelict", "Glacier", "Gorge", "Highlands", "Paradise", "Skybridge", "Space01", "Space02"};
 
 				ImGui::SliderInt("Num Friendly Bots", &numBotsTeamOne, 0, 7);
 				ImGui::SliderInt("Num Enemy Bots", &numBotsTeamTwo, 0, 8);
 				ImGui::Combo("Bot Difficulty", &difficulty, difficultyNames, 3);
+				ImGui::Combo("Map", &map, mapNames, 10);
+				ImGui::InputText("Loadout Path", &singleplayerLoadoutString);
+
+				if (ImGui::Button("Launch Singleplayer")) {
+					launchSingleplayer = true;
+				}
 
 				ImGui::EndTabItem();
 			}
-			*/
 			if (ImGui::BeginTabItem("Tutorial")) {
 				if (ImGui::Button("Launch Tutorial"))
 					launchTutorial = true;
@@ -560,6 +744,10 @@ void InitConsole() {
 	freopen_s(&fDummy, "CONOUT$", "w", stdout);
 }
 
+int serverNumBotsTeamOne = 0;
+int serverNumBotsTeamTwo = 0;
+int serverBotDifficulty = 0;
+
 /*
 	Loads server configuration from cfg.txt in the Win64 folder
 */
@@ -568,6 +756,26 @@ void LoadConfiguration() {
 
 	std::getline(cfgFile, mapCommand);
 	std::getline(cfgFile, loadoutString);
+
+	std::string procLine;
+
+	std::getline(cfgFile, procLine);
+
+	serverNumBotsTeamOne = std::stoi(procLine);
+
+	procLine = "";
+
+	std::getline(cfgFile, procLine);
+
+	serverNumBotsTeamTwo = std::stoi(procLine);
+
+	procLine = "";
+
+	std::getline(cfgFile, procLine);
+
+	serverBotDifficulty = std::stoi(procLine);
+
+	procLine = "";
 }
 
 /*
@@ -652,6 +860,10 @@ void ServerStartCallbacks() {
 	procMapLoad = true;
 
 	Sleep(20 * 1000);
+
+	if (serverNumBotsTeamOne > 0 || serverNumBotsTeamTwo > 0) {
+		SetupMultiplayerAI(serverNumBotsTeamOne, serverNumBotsTeamTwo, serverBotDifficulty);
+	}
 
 	ForceSpawnLocalPlayer();
 
