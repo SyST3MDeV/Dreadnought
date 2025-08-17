@@ -6,6 +6,8 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <vector>
+#include <map>
 
 using namespace CG;
 
@@ -20,6 +22,155 @@ ID3D11RenderTargetView* mainRenderTargetView;
 
 uintptr_t global_baseaddress = 0;
 
+
+// Enhanced ship class definitions based on discovered files
+enum class ShipClass {
+	ASSAULT,      // Fast attack ships (was Corvette)
+	SCOUT,        // Fast reconnaissance (was Fighter) 
+	SNIPER,       // Long-range damage (was Destroyer)
+	SUPPORT,      // Healing/utility (was Tactical Cruiser)
+	DREADNOUGHT   // Capital ships
+};
+
+enum class ShipSize {
+	LIGHT,
+	MEDIUM,
+	HEAVY
+};
+
+enum class LoadoutCategory {
+	PRECAST_STANDARD,  // T1-T5 standard loadouts
+	HERO,              // Named hero ships
+	HAVOC,             // Special Havoc mode ships
+	SPECIAL,           // Special event/PAX ships
+	DEVELOPMENT        // Development loadouts
+};
+
+// Ship data structure
+struct ShipLoadout {
+	std::string name;
+	std::string description;
+	std::string loadoutPath;
+	ShipClass shipClass;
+	ShipSize shipSize;
+	LoadoutCategory category;
+	int tier;
+	bool unlocked;
+	bool isHero;
+	std::string heroName; // For hero ships
+};
+
+// Comprehensive loadout database based on your discoveries
+static std::vector<ShipLoadout> availableShips = {
+	// ========== TIER 1 PRECAST SHIPS ==========
+	{"Assault Medium T1", "Basic assault ship", "/Game/Generic/Loadouts/Precast/T1/VH_AssaultMedium_T1_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 1, true, false, ""},
+	{"Dreadnought Medium T1", "Basic capital ship", "/Game/Generic/Loadouts/Precast/T1/VH_DreadnoughtMedium_T1_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 1, true, false, ""},
+	{"Sniper Medium T1", "Basic sniper ship", "/Game/Generic/Loadouts/Precast/T1/VH_SniperMedium_T1_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 1, true, false, ""},
+	{"Support Medium T1", "Basic support ship", "/Game/Generic/Loadouts/Precast/T1/VH_SupportMedium_T1_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 1, true, false, ""},
+
+	// ========== TIER 2 PRECAST SHIPS ==========
+	{"Assault Medium T2", "Improved assault ship", "/Game/Generic/Loadouts/Precast/T2/VH_AssaultMedium_T2_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 2, true, false, ""},
+	{"Dreadnought Medium T2", "Improved capital ship", "/Game/Generic/Loadouts/Precast/T2/VH_DreadnoughtMedium_T2_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 2, true, false, ""},
+	{"Scout Light T2", "Fast reconnaissance", "/Game/Generic/Loadouts/Precast/T2/VH_ScoutLight_T2_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 2, true, false, ""},
+	{"Sniper Light T2", "Light sniper", "/Game/Generic/Loadouts/Precast/T2/VH_SniperLight_T2_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 2, true, false, ""},
+	{"Sniper Medium T2", "Medium sniper", "/Game/Generic/Loadouts/Precast/T2/VH_SniperMedium_T2_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 2, true, false, ""},
+	{"Support Medium T2", "Improved support", "/Game/Generic/Loadouts/Precast/T2/VH_SupportMedium_T2_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 2, true, false, ""},
+
+	// ========== TIER 3 PRECAST SHIPS ==========
+	{"Assault Heavy T3", "Heavy assault ship", "/Game/Generic/Loadouts/Precast/T3/VH_AssaultHeavy_T3_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Assault Medium T3", "Advanced assault", "/Game/Generic/Loadouts/Precast/T3/VH_AssaultMedium_T3_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Dreadnought Light T3", "Light capital ship", "/Game/Generic/Loadouts/Precast/T3/VH_DreadnoughtLight_T3_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Dreadnought Medium T3", "Advanced capital", "/Game/Generic/Loadouts/Precast/T3/VH_DreadnoughtMedium_T3_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Scout Heavy T3", "Heavy scout", "/Game/Generic/Loadouts/Precast/T3/VH_ScoutHeavy_T3_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Scout Light T3", "Advanced light scout", "/Game/Generic/Loadouts/Precast/T3/VH_ScoutLight_T3_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Scout Medium T3", "Medium scout", "/Game/Generic/Loadouts/Precast/T3/VH_ScoutMedium_T3_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Sniper Heavy T3", "Heavy sniper", "/Game/Generic/Loadouts/Precast/T3/VH_SniperHeavy_T3_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Sniper Light T3", "Advanced light sniper", "/Game/Generic/Loadouts/Precast/T3/VH_SniperLight_T3_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Sniper Medium T3", "Advanced medium sniper", "/Game/Generic/Loadouts/Precast/T3/VH_SniperMedium_T3_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Support Light T3", "Light support", "/Game/Generic/Loadouts/Precast/T3/VH_SupportLight_T3_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+	{"Support Medium T3", "Advanced support", "/Game/Generic/Loadouts/Precast/T3/VH_SupportMedium_T3_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 3, true, false, ""},
+
+	// ========== TIER 4 PRECAST SHIPS ==========
+	{"Assault Heavy T4", "Elite heavy assault", "/Game/Generic/Loadouts/Precast/T4/VH_AssaultHeavy_T4_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Assault Light T4", "Elite light assault", "/Game/Generic/Loadouts/Precast/T4/VH_AssaultLight_T4_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Assault Medium T4", "Elite assault", "/Game/Generic/Loadouts/Precast/T4/VH_AssaultMedium_T4_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Dreadnought Heavy T4", "Heavy capital ship", "/Game/Generic/Loadouts/Precast/T4/VH_DreadnoughtHeavy_T4_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Dreadnought Light T4", "Elite light capital", "/Game/Generic/Loadouts/Precast/T4/VH_DreadnoughtLight_T4_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Dreadnought Medium T4", "Elite capital", "/Game/Generic/Loadouts/Precast/T4/VH_DreadnoughtMedium_T4_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Scout Heavy T4", "Elite heavy scout", "/Game/Generic/Loadouts/Precast/T4/VH_ScoutHeavy_T4_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Scout Light T4", "Elite light scout", "/Game/Generic/Loadouts/Precast/T4/VH_ScoutLight_T4_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Scout Medium T4", "Elite scout", "/Game/Generic/Loadouts/Precast/T4/VH_ScoutMedium_T4_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Sniper Heavy T4", "Elite heavy sniper", "/Game/Generic/Loadouts/Precast/T4/VH_SniperHeavy_T4_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Sniper Light T4", "Elite light sniper", "/Game/Generic/Loadouts/Precast/T4/VH_SniperLight_T4_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Sniper Medium T4", "Elite sniper", "/Game/Generic/Loadouts/Precast/T4/VH_SniperMedium_T4_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Support Heavy T4", "Elite heavy support", "/Game/Generic/Loadouts/Precast/T4/VH_SupportHeavy_T4_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Support Light T4", "Elite light support", "/Game/Generic/Loadouts/Precast/T4/VH_SupportLight_T4_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+	{"Support Medium T4", "Elite support", "/Game/Generic/Loadouts/Precast/T4/VH_SupportMedium_T4_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 4, true, false, ""},
+
+	// ========== TIER 5 PRECAST SHIPS ==========
+	{"Assault Heavy T5", "Ultimate heavy assault", "/Game/Generic/Loadouts/Precast/T5/VH_AssaultHeavy_T5_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Assault Light T5", "Ultimate light assault", "/Game/Generic/Loadouts/Precast/T5/VH_AssaultLight_PrecastLoadout_T5_BP", ShipClass::ASSAULT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Assault Medium T5", "Ultimate assault", "/Game/Generic/Loadouts/Precast/T5/VH_AssaultMedium_T5_PrecastLoadout_BP", ShipClass::ASSAULT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Dreadnought Heavy T5", "Ultimate heavy capital", "/Game/Generic/Loadouts/Precast/T5/VH_DreadnoughtHeavy_T5_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Dreadnought Light T5", "Ultimate light capital", "/Game/Generic/Loadouts/Precast/T5/VH_DreadnoughtLight_T5_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Dreadnought Medium T5", "Ultimate capital", "/Game/Generic/Loadouts/Precast/T5/VH_DreadnoughtMedium_T5_PrecastLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Scout Heavy T5", "Ultimate heavy scout", "/Game/Generic/Loadouts/Precast/T5/VH_ScoutHeavy_T5_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Scout Light T5", "Ultimate light scout", "/Game/Generic/Loadouts/Precast/T5/VH_ScoutLight_T5_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Scout Medium T5", "Ultimate scout", "/Game/Generic/Loadouts/Precast/T5/VH_ScoutMedium_T5_PrecastLoadout_BP", ShipClass::SCOUT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Sniper Heavy T5", "Ultimate heavy sniper", "/Game/Generic/Loadouts/Precast/T5/VH_SniperHeavy_T5_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Sniper Light T5", "Ultimate light sniper", "/Game/Generic/Loadouts/Precast/T5/VH_SniperLight_T5_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Sniper Medium T5", "Ultimate sniper", "/Game/Generic/Loadouts/Precast/T5/VH_SniperMedium_T5_PrecastLoadout_BP", ShipClass::SNIPER, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Support Heavy T5", "Ultimate heavy support", "/Game/Generic/Loadouts/Precast/T5/VH_SupportHeavy_T5_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::HEAVY, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Support Light T5", "Ultimate light support", "/Game/Generic/Loadouts/Precast/T5/VH_SupportLight_T5_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::LIGHT, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+	{"Support Medium T5", "Ultimate support", "/Game/Generic/Loadouts/Precast/T5/VH_SupportMedium_T5_PrecastLoadout_BP", ShipClass::SUPPORT, ShipSize::MEDIUM, LoadoutCategory::PRECAST_STANDARD, 5, true, false, ""},
+
+	// ========== HERO SHIPS (Selection) ==========
+	{"Jarilo", "Heavy assault hero", "/Game/Generic/Loadouts/Hero/VH_AssaultHeavy_Jarilo_HeroLoadout_BP", ShipClass::ASSAULT, ShipSize::HEAVY, LoadoutCategory::HERO, 5, true, true, "Jarilo"},
+	{"Skagerrak", "Heavy assault hero", "/Game/Generic/Loadouts/Hero/VH_AssaultHeavy_Skagerrak_HeroLoadout_BP", ShipClass::ASSAULT, ShipSize::HEAVY, LoadoutCategory::HERO, 5, true, true, "Skagerrak"},
+	{"Minotaurus", "Light assault hero", "/Game/Generic/Loadouts/Hero/VH_AssaultLight_Minotaurus_HeroLoadout_BP", ShipClass::ASSAULT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Minotaurus"},
+	{"Wolf Head", "Light assault hero", "/Game/Generic/Loadouts/Hero/VH_AssaultLight_WolfHead_HeroLoadout_BP", ShipClass::ASSAULT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Wolf Head"},
+	{"Hammerhead", "Medium assault hero", "/Game/Generic/Loadouts/Hero/VH_AssaultMedium_Hammerhead_HeroLoadout_BP", ShipClass::ASSAULT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Hammerhead"},
+	{"Orion", "Medium assault hero", "/Game/Generic/Loadouts/Hero/VH_AssaultMedium_Orion_HeroLoadout_BP", ShipClass::ASSAULT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Orion"},
+	{"Samar", "Medium assault hero", "/Game/Generic/Loadouts/Hero/VH_AssaultMedium_Samar_HeroLoadout_BP", ShipClass::ASSAULT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Samar"},
+	{"Trident", "Heavy dreadnought hero", "/Game/Generic/Loadouts/Hero/VH_DreadnoughtHeavy_Trident_HeroLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::HEAVY, LoadoutCategory::HERO, 5, true, true, "Trident"},
+	{"Dragon", "Light dreadnought hero", "/Game/Generic/Loadouts/Hero/VH_DreadnoughtLight_Dragon_HeroLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Dragon"},
+	{"Leviathan", "Light dreadnought hero", "/Game/Generic/Loadouts/Hero/VH_DreadnoughtLight_Leviathan_HeroLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Leviathan"},
+	{"Nimbus", "Light dreadnought hero", "/Game/Generic/Loadouts/Hero/VH_DreadnoughtLight_Nimbus_HeroLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Nimbus"},
+	{"Morningstar", "Medium dreadnought hero", "/Game/Generic/Loadouts/Hero/VH_DreadnoughtMedium_Morningstar_HeroLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Morningstar"},
+	{"Ravenswood", "Medium dreadnought hero", "/Game/Generic/Loadouts/Hero/VH_DreadnoughtMedium_Ravenswood_HeroLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Ravenswood"},
+	{"Zilant", "Medium dreadnought hero", "/Game/Generic/Loadouts/Hero/VH_DreadnoughtMedium_Zilant_HeroLoadout_BP", ShipClass::DREADNOUGHT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Zilant"},
+	{"Aquila", "Light scout hero", "/Game/Generic/Loadouts/Hero/VH_ScoutLight_Aquila_HeroLoadout_BP", ShipClass::SCOUT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Aquila"},
+	{"Hermes", "Light scout hero", "/Game/Generic/Loadouts/Hero/VH_ScoutLight_Hermes_HeroLoadout_BP", ShipClass::SCOUT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Hermes"},
+	{"Viper", "Light scout hero", "/Game/Generic/Loadouts/Hero/VH_ScoutLight_Viper_HeroLoadout_BP", ShipClass::SCOUT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Viper"},
+	{"Outis", "Medium scout hero", "/Game/Generic/Loadouts/Hero/VH_ScoutMedium_Outis_HeroLoadout_BP", ShipClass::SCOUT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Outis"},
+	{"Phoenix", "Medium scout hero", "/Game/Generic/Loadouts/Hero/VH_ScoutMedium_Phoenix_Heroloadout_BP", ShipClass::SCOUT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Phoenix"},
+	{"Kore", "Heavy sniper hero", "/Game/Generic/Loadouts/Hero/VH_SniperHeavy_Kore_HeroLoadout_BP", ShipClass::SNIPER, ShipSize::HEAVY, LoadoutCategory::HERO, 5, true, true, "Kore"},
+	{"Tunmen", "Heavy sniper hero", "/Game/Generic/Loadouts/Hero/VH_SniperHeavy_Tunmen_HeroLoadout_BP", ShipClass::SNIPER, ShipSize::HEAVY, LoadoutCategory::HERO, 5, true, true, "Tunmen"},
+	{"Hasta", "Light sniper hero", "/Game/Generic/Loadouts/Hero/VH_SniperLight_Hasta_HeroLoadout_BP", ShipClass::SNIPER, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Hasta"},
+	{"Silesia", "Light sniper hero", "/Game/Generic/Loadouts/Hero/VH_SniperLight_Silesia_HeroLoadout_BP", ShipClass::SNIPER, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Silesia"},
+	{"Artemis", "Medium sniper hero", "/Game/Generic/Loadouts/Hero/VH_SniperMedium_Artemis_HeroLoadout_BP", ShipClass::SNIPER, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Artemis"},
+	{"Jerina", "Medium sniper hero", "/Game/Generic/Loadouts/Hero/VH_SniperMedium_Jerina_HeroLoadout_BP", ShipClass::SNIPER, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Jerina"},
+	{"Indrik", "Heavy support hero", "/Game/Generic/Loadouts/Hero/VH_SupportHeavy_Indrik_HeroLoadout_BP", ShipClass::SUPPORT, ShipSize::HEAVY, LoadoutCategory::HERO, 5, true, true, "Indrik"},
+	{"Kali", "Heavy support hero", "/Game/Generic/Loadouts/Hero/VH_SupportHeavy_Kali_HeroLoadout_BP", ShipClass::SUPPORT, ShipSize::HEAVY, LoadoutCategory::HERO, 5, true, true, "Kali"},
+	{"Jester", "Light support hero", "/Game/Generic/Loadouts/Hero/VH_SupportLight_Jester_HeroLoadout_BP", ShipClass::SUPPORT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Jester"},
+	{"Strix", "Light support hero", "/Game/Generic/Loadouts/Hero/VH_SupportLight_Strix_HeroLoadout_BP", ShipClass::SUPPORT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Strix"},
+	{"Tonder", "Light support hero", "/Game/Generic/Loadouts/Hero/VH_SupportLight_Tonder_HeroLoadout_BP", ShipClass::SUPPORT, ShipSize::LIGHT, LoadoutCategory::HERO, 5, true, true, "Tonder"},
+	{"Akkoro", "Medium support hero", "/Game/Generic/Loadouts/Hero/VH_SupportMedium_Akkoro_HeroLoadout_BP", ShipClass::SUPPORT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Akkoro"},
+	{"Anansi", "Medium support hero", "/Game/Generic/Loadouts/Hero/VH_SupportMedium_Anansi_HeroLoadout_BP", ShipClass::SUPPORT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Anansi"},
+	{"Nereid", "Medium support hero", "/Game/Generic/Loadouts/Hero/VH_SupportMedium_Nereid_HeroLoadout_BP", ShipClass::SUPPORT, ShipSize::MEDIUM, LoadoutCategory::HERO, 5, true, true, "Nereid"}
+};
+
+// Global variables for ship selection
+static int selectedShipIndex = 0;
+static ShipClass filterClass = ShipClass::ASSAULT;
+static ShipSize filterSize = ShipSize::MEDIUM;
+static LoadoutCategory filterCategory = LoadoutCategory::PRECAST_STANDARD;
+static int filterTier = 0; // 0 = all tiers
+static bool showAllClasses = true;
+static bool showAllSizes = true;
+static bool showAllCategories = true;
+static bool showAllTiers = true;
+static bool showHeroOnly = false;
 
 /*
 	Iterates over the global objects array, and finds the final object of the given type
@@ -441,6 +592,226 @@ void RespawnThread() {
 	}
 }
 
+
+const char* GetShipClassName(ShipClass shipClass) {
+	switch (shipClass) {
+	case ShipClass::ASSAULT: return "Assault";
+	case ShipClass::SCOUT: return "Scout";
+	case ShipClass::SNIPER: return "Sniper";
+	case ShipClass::SUPPORT: return "Support";
+	case ShipClass::DREADNOUGHT: return "Dreadnought";
+	default: return "Unknown";
+	}
+}
+
+const char* GetShipSizeName(ShipSize shipSize) {
+	switch (shipSize) {
+	case ShipSize::LIGHT: return "Light";
+	case ShipSize::MEDIUM: return "Medium";
+	case ShipSize::HEAVY: return "Heavy";
+	default: return "Unknown";
+	}
+}
+
+const char* GetCategoryName(LoadoutCategory category) {
+	switch (category) {
+	case LoadoutCategory::PRECAST_STANDARD: return "Standard";
+	case LoadoutCategory::HERO: return "Hero";
+	case LoadoutCategory::HAVOC: return "Havoc";
+	case LoadoutCategory::SPECIAL: return "Special";
+	case LoadoutCategory::DEVELOPMENT: return "Development";
+	default: return "Unknown";
+	}
+}
+
+ImVec4 GetShipClassColor(ShipClass shipClass) {
+	switch (shipClass) {
+	case ShipClass::ASSAULT: return ImVec4(1.0f, 0.2f, 0.2f, 1.0f);      // Red
+	case ShipClass::SCOUT: return ImVec4(0.2f, 1.0f, 0.2f, 1.0f);        // Green
+	case ShipClass::SNIPER: return ImVec4(0.2f, 0.8f, 1.0f, 1.0f);       // Light Blue
+	case ShipClass::SUPPORT: return ImVec4(0.8f, 0.2f, 1.0f, 1.0f);      // Purple
+	case ShipClass::DREADNOUGHT: return ImVec4(1.0f, 0.8f, 0.2f, 1.0f);  // Gold
+	default: return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);                      // White
+	}
+}
+
+ImVec4 GetCategoryColor(LoadoutCategory category) {
+	switch (category) {
+	case LoadoutCategory::PRECAST_STANDARD: return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // White
+	case LoadoutCategory::HERO: return ImVec4(1.0f, 0.8f, 0.0f, 1.0f);             // Gold
+	case LoadoutCategory::HAVOC: return ImVec4(1.0f, 0.3f, 0.3f, 1.0f);            // Red
+	case LoadoutCategory::SPECIAL: return ImVec4(0.5f, 0.8f, 1.0f, 1.0f);          // Light Blue
+	case LoadoutCategory::DEVELOPMENT: return ImVec4(0.7f, 0.7f, 0.7f, 1.0f);      // Gray
+	default: return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);                               // White
+	}
+}
+
+std::vector<int> GetFilteredShipIndices() {
+	std::vector<int> filteredIndices;
+	for (int i = 0; i < availableShips.size(); i++) {
+		const ShipLoadout& ship = availableShips[i];
+
+		// Apply filters
+		if (!showAllClasses && ship.shipClass != filterClass) continue;
+		if (!showAllSizes && ship.shipSize != filterSize) continue;
+		if (!showAllCategories && ship.category != filterCategory) continue;
+		if (!showAllTiers && filterTier != 0 && ship.tier != filterTier) continue;
+		if (showHeroOnly && !ship.isHero) continue;
+
+		filteredIndices.push_back(i);
+	}
+	return filteredIndices;
+}
+
+void RenderAdvancedShipSelectionMenu() {
+	ImGui::Separator();
+	ImGui::Text("Advanced Ship Selection System");
+
+	// Filter controls
+	ImGui::Text("Filters:");
+
+	// Row 1: Class and Size filters
+	ImGui::Checkbox("All Classes", &showAllClasses);
+	if (!showAllClasses) {
+		ImGui::SameLine();
+		const char* classNames[] = { "Assault", "Scout", "Sniper", "Support", "Dreadnought" };
+		int currentClass = static_cast<int>(filterClass);
+		if (ImGui::Combo("Class", &currentClass, classNames, 5)) {
+			filterClass = static_cast<ShipClass>(currentClass);
+		}
+	}
+
+	ImGui::SameLine();
+	ImGui::Checkbox("All Sizes", &showAllSizes);
+	if (!showAllSizes) {
+		ImGui::SameLine();
+		const char* sizeNames[] = { "Light", "Medium", "Heavy" };
+		int currentSize = static_cast<int>(filterSize);
+		if (ImGui::Combo("Size", &currentSize, sizeNames, 3)) {
+			filterSize = static_cast<ShipSize>(currentSize);
+		}
+	}
+
+	// Row 2: Category and Tier filters
+	ImGui::Checkbox("All Categories", &showAllCategories);
+	if (!showAllCategories) {
+		ImGui::SameLine();
+		const char* categoryNames[] = { "Standard", "Hero", "Havoc", "Special", "Development" };
+		int currentCategory = static_cast<int>(filterCategory);
+		if (ImGui::Combo("Category", &currentCategory, categoryNames, 5)) {
+			filterCategory = static_cast<LoadoutCategory>(currentCategory);
+		}
+	}
+
+	ImGui::SameLine();
+	ImGui::Checkbox("All Tiers", &showAllTiers);
+	if (!showAllTiers) {
+		ImGui::SameLine();
+		const char* tierNames[] = { "All", "Tier 1", "Tier 2", "Tier 3", "Tier 4", "Tier 5" };
+		if (ImGui::Combo("Tier", &filterTier, tierNames, 6)) {
+			// filterTier is already set by ImGui::Combo
+		}
+	}
+
+	// Hero filter
+	ImGui::Checkbox("Hero Ships Only", &showHeroOnly);
+
+	ImGui::Separator();
+
+	// Ship count info
+	std::vector<int> filteredShips = GetFilteredShipIndices();
+	ImGui::Text("Showing %d of %d ships", (int)filteredShips.size(), (int)availableShips.size());
+
+	// Ship list with enhanced display
+	if (ImGui::BeginChild("AdvancedShipList", ImVec2(0, 300), true)) {
+		for (int i = 0; i < filteredShips.size(); i++) {
+			int shipIndex = filteredShips[i];
+			const ShipLoadout& ship = availableShips[shipIndex];
+
+			// Create display name with class, size, and tier info
+			std::string displayName = ship.name;
+			if (ship.isHero) {
+				displayName = "" + displayName;
+			}
+
+			// Set color based on category
+			ImGui::PushStyleColor(ImGuiCol_Text, GetCategoryColor(ship.category));
+
+			bool isSelected = (selectedShipIndex == shipIndex);
+			if (ImGui::Selectable(displayName.c_str(), isSelected)) {
+				selectedShipIndex = shipIndex;
+				singleplayerLoadoutString = ship.loadoutPath;
+			}
+
+			ImGui::PopStyleColor();
+
+			// Show detailed tooltip
+			if (ImGui::IsItemHovered()) {
+				ImGui::BeginTooltip();
+				ImGui::Text("Ship: %s", ship.name.c_str());
+				if (ship.isHero) {
+					ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "Hero Ship: %s", ship.heroName.c_str());
+				}
+				ImGui::Text("Class: %s %s", GetShipSizeName(ship.shipSize), GetShipClassName(ship.shipClass));
+				ImGui::Text("Tier: %d", ship.tier);
+				ImGui::Text("Category: %s", GetCategoryName(ship.category));
+				ImGui::Text("Description: %s", ship.description.c_str());
+				ImGui::Separator();
+				ImGui::Text("Path: %s", ship.loadoutPath.c_str());
+				ImGui::EndTooltip();
+			}
+		}
+	}
+	ImGui::EndChild();
+
+	// Selected ship details panel
+	if (selectedShipIndex < availableShips.size()) {
+		const ShipLoadout& selectedShip = availableShips[selectedShipIndex];
+
+		ImGui::Separator();
+		ImGui::Text("Selected Ship Details:");
+
+		// Ship name with star for hero ships
+		if (selectedShip.isHero) {
+			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "%s", selectedShip.name.c_str());
+			ImGui::Text("Hero: %s", selectedShip.heroName.c_str());
+		}
+		else {
+			ImGui::TextColored(GetShipClassColor(selectedShip.shipClass), "%s", selectedShip.name.c_str());
+		}
+
+		// Ship stats
+		ImGui::Text("Class: %s %s", GetShipSizeName(selectedShip.shipSize), GetShipClassName(selectedShip.shipClass));
+		ImGui::Text("Tier: %d | Category: %s", selectedShip.tier, GetCategoryName(selectedShip.category));
+		ImGui::TextWrapped("Description: %s", selectedShip.description.c_str());
+
+		// Action buttons
+		ImGui::Spacing();
+		if (ImGui::Button("Use This Ship", ImVec2(120, 30))) {
+			singleplayerLoadoutString = selectedShip.loadoutPath;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Copy Path", ImVec2(120, 30))) {
+			ImGui::SetClipboardText(selectedShip.loadoutPath.c_str());
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Clear Filters", ImVec2(120, 30))) {
+			showAllClasses = true;
+			showAllSizes = true;
+			showAllCategories = true;
+			showAllTiers = true;
+			showHeroOnly = false;
+			filterTier = 0;
+		}
+	}
+
+	ImGui::Separator();
+
+	// Current loadout path display
+	ImGui::Text("Current Loadout Path:");
+	ImGui::InputText("##CurrentLoadout", &singleplayerLoadoutString);
+}
+
 bool init = false;
 bool menuEnabled = true;
 
@@ -491,6 +862,13 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 				ImGui::Combo("Bot Difficulty", &difficulty, difficultyNames, 3);
 				ImGui::Combo("Map", &map, mapNames, 10);
 				ImGui::InputText("Loadout Path", &singleplayerLoadoutString);
+
+				ImGui::Spacing();
+
+				// Enhanced ship selection menu
+				RenderAdvancedShipSelectionMenu();
+
+				ImGui::Spacing();
 
 				if (ImGui::Button("Launch Singleplayer")) {
 					launchSingleplayer = true;
@@ -667,6 +1045,8 @@ HRESULT hkResizeBuffers(IDXGISwapChain* pThis, UINT BufferCount, UINT Width, UIN
 	pContext->RSSetViewports(1, &vp);
 	return hr;
 }
+
+
 
 /*
 	This stub function prevents the hud from being created on the listen player. Without this, the server will crash on any player's death.
