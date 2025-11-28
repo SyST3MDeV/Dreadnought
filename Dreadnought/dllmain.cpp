@@ -903,7 +903,9 @@ void MainThread()
 
 	InitHooking();
 
-	Sleep(25 * 1000);
+	while (!*UWorld::GWorld) {
+		Sleep(1);
+	}
 
 	InitGameConsole();
 
