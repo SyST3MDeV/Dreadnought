@@ -908,11 +908,11 @@ DWORD WINAPI DreadnoughtMainThread(LPVOID lpReserved)
 	} while (!init_hook);
 
 	while (true) {
-		if (GetAsyncKeyState(VK_F1) && !menuToggledThisFrame) {
+		if (GetAsyncKeyState(VK_F7) && !menuToggledThisFrame) {
 			menuToggledThisFrame = true;
 			menuEnabled = !menuEnabled;
 		}
-		else if(!GetAsyncKeyState(VK_F1)){
+		else if(!GetAsyncKeyState(VK_F7)){
 			menuToggledThisFrame = false;
 		}
 	}
