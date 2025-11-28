@@ -690,21 +690,34 @@ void EndMatchHook(void* param1) {
 	return;
 }
 
+void* origEACErrorMessageHook = nullptr;
+
+/*
+	Prevent EAC from booting on the client so we don't get an error popup
+*/
+uint8_t EACErrorMessageHook(__int64 a1, __int64 a2) {
+	return 1; // 1 = Success here
+}
+
 /*
 	Hook ProcessEvent and set the global base address variable
 */
 void InitHooking() {
-	uintptr_t base_address = (uintptr_t)GetModuleHandleA("DreadGame-Win64-Shipping.exe");
+	uintptr_t base_address = (uintptr_t)GetModuleHandleA(nullptr);
 
 	global_baseaddress = base_address;
 
 	MH_Initialize();
 
-	ProcessEvent hookRef = (ProcessEvent)GetVFunction<void(*)(UObject*, class UFunction*, void*)>(UObject::StaticClass(), 0x35);
+	//ProcessEvent hookRef = (ProcessEvent)GetVFunction<void(*)(UObject*, class UFunction*, void*)>(UObject::StaticClass(), 0x35);
 
-	MH_CreateHook(hookRef, ProcessEventHook, reinterpret_cast<LPVOID*>(&origProcessEvent));
+	//MH_CreateHook(hookRef, ProcessEventHook, reinterpret_cast<LPVOID*>(&origProcessEvent));
 
-	MH_EnableHook(hookRef);
+	//MH_EnableHook(hookRef);
+
+	MH_CreateHook((void*)(global_baseaddress + 0x29FD910), EACErrorMessageHook, &origEACErrorMessageHook);
+
+	MH_EnableHook((void*)(global_baseaddress + 0x29FD910));
 
 #ifdef SERVER_BUILD
 	void* hookRef2 = (void*)(global_baseaddress + 0x055B050);
@@ -737,7 +750,8 @@ void InitGameConsole() {
 /*
 	DEBUG ONLY: Allow us to use std::cout and have it output to the window opened when the game is launched with -log
 */
-void InitConsole() {	
+void InitConsole() {
+	AllocConsole();
 	FILE* fDummy;
 	freopen_s(&fDummy, "CONIN$", "r", stdin);
 	freopen_s(&fDummy, "CONOUT$", "w", stderr);
@@ -881,13 +895,15 @@ void ServerStartCallbacks() {
 /*
 	Main thread, runs common init logic, then runs server or client buisness logic
 */
-DWORD WINAPI DreadnoughtMainThread(LPVOID lpReserved)
+void MainThread()
 {
+	InitConsole();
+
 	InitSdk();
 
 	InitHooking();
 
-	InitConsole();
+	Sleep(25 * 1000);
 
 	InitGameConsole();
 
@@ -917,8 +933,16 @@ DWORD WINAPI DreadnoughtMainThread(LPVOID lpReserved)
 		}
 	}
 #endif
+}
 
-	return TRUE;
+/*
+	Init: Runs in dllmain, just spawns a thread to do all our actual work
+*/
+
+void Init()
+{
+	std::thread t(MainThread);
+	t.detach();
 }
 
 /*
@@ -930,7 +954,7 @@ BOOL WINAPI DllMain(HMODULE hMod, DWORD dwReason, LPVOID lpReserved)
 	{
 	case DLL_PROCESS_ATTACH:
 		DisableThreadLibraryCalls(hMod);
-		CreateThread(nullptr, 0, DreadnoughtMainThread, hMod, 0, nullptr);
+		Init();
 		break;
 	case DLL_PROCESS_DETACH:
 #ifndef SERVER_BUILD

@@ -3,21 +3,18 @@
 
 #include <thread>
 
-void DreadnoughtInjectionThread() {
-    Sleep(25000);
-    LoadLibraryA("Dreadnought.dll");
+DWORD WINAPI LoadDllThread(LPVOID lpParam) {
+    HMODULE hMod = LoadLibraryA("Dreadnought.dll");
+    return 0;
 }
-
-BOOL APIENTRY DllMain( HMODULE hModule,
-                       DWORD  ul_reason_for_call,
-                       LPVOID lpReserved
-                     )
+BOOL APIENTRY DllMain(HMODULE hModule,
+    DWORD ul_reason_for_call,
+    LPVOID lpReserved)
 {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
-        std::thread t(DreadnoughtInjectionThread);
-        t.detach();
+        DisableThreadLibraryCalls(hModule);
+        CreateThread(NULL, 0, LoadDllThread, NULL, 0, NULL);
     }
-
     return TRUE;
 }
 
