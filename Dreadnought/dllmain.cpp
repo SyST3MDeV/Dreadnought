@@ -18,8 +18,11 @@ ID3D11Device* pDevice = NULL;
 ID3D11DeviceContext* pContext = NULL;
 ID3D11RenderTargetView* mainRenderTargetView;
 
-uintptr_t global_baseaddress = 0;
+namespace Globals {
+	uintptr_t ModuleBase = 0; // Base address of main module
 
+	bool AmServer = false; // Are we playing as a server
+}
 
 /*
 	Iterates over the global objects array, and finds the final object of the given type
@@ -45,7 +48,7 @@ void ListAllObjectsOfType() {
 */
 void* FMemoryMalloc(size_t size) {
 	//0C06B70
-	return reinterpret_cast<void * (*)(size_t size, uint32_t alignment)>(global_baseaddress + 0x0C06B70)(size, 0);
+	return reinterpret_cast<void * (*)(size_t size, uint32_t alignment)>(Globals::ModuleBase + 0x0C06B70)(size, 0);
 }
 
 /*
@@ -54,7 +57,7 @@ void* FMemoryMalloc(size_t size) {
 UObject* StaticLoadClass(UClass* ObjectClass, UObject* InOuter, const TCHAR* InName) {
 	//UClass* ObjectClass, UObject* InOuter, const TCHAR* InName, const TCHAR* Filename, uint32 LoadFlags, UPackageMap* Sandbox, bool bAllowObjectReconciliation 
 	//0D78110
-	return reinterpret_cast<UObject* (*)(UClass * ObjectClass, UObject * InOuter, const TCHAR * InName, const TCHAR * Filename, int LoadFlags, UPackageMap * Sandbox, bool bAllowObjectReconciliation)>(global_baseaddress + 0x0D78110)(ObjectClass, InOuter, InName, nullptr, 0, nullptr, false);
+	return reinterpret_cast<UObject* (*)(UClass * ObjectClass, UObject * InOuter, const TCHAR * InName, const TCHAR * Filename, int LoadFlags, UPackageMap * Sandbox, bool bAllowObjectReconciliation)>(Globals::ModuleBase + 0x0D78110)(ObjectClass, InOuter, InName, nullptr, 0, nullptr, false);
 }
 
 /*
@@ -281,125 +284,125 @@ void DelaySingleplayerSetupThread(std::string loadoutString) {
 		- Execute code in the main game thread
 */
 void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
-#ifdef SERVER_BUILD
-	if (interceptPostLogin && function->GetFullName().find("PostLogin") != std::string::npos) { //Kick off the player controller init sequence
-		AGameMode_K2_PostLogin_Params* cast_params = ((AGameMode_K2_PostLogin_Params*)params);
+	if (Globals::AmServer) {
+		if (interceptPostLogin && function->GetFullName().find("PostLogin") != std::string::npos) { //Kick off the player controller init sequence
+			AGameMode_K2_PostLogin_Params* cast_params = ((AGameMode_K2_PostLogin_Params*)params);
 
-		AYPlayerController* pc = (AYPlayerController*)cast_params->NewPlayer;
+			AYPlayerController* pc = (AYPlayerController*)cast_params->NewPlayer;
 
-		void* ret = origProcessEvent(object, function, params);
+			void* ret = origProcessEvent(object, function, params);
 
-		if (!flipTeams) { //Set every player to the opposite team so our matches are something resembling balanced!
-			pc->SetTeam(EYTeam::YT_TEAM2);
+			if (!flipTeams) { //Set every player to the opposite team so our matches are something resembling balanced!
+				pc->SetTeam(EYTeam::YT_TEAM2);
+			}
+			else {
+				pc->SetTeam(EYTeam::YT_TEAM1);
+			}
+
+			flipTeams = !flipTeams;
+
+			std::wstring wLoadoutString(loadoutString.begin(), loadoutString.end());
+
+			StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, wLoadoutString.c_str());
+
+			UYShipLoadout* loadoutToApply = nullptr;
+
+			for (UYShipLoadout* cmpLoadout : UObject::FindObjects< UYShipLoadout>()) {
+				if (cmpLoadout->GetFullName().find(loadoutString.substr(loadoutString.find_last_of("/") + 1)) != std::string::npos) {
+					loadoutToApply = cmpLoadout;
+				}
+			}
+
+			pc->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
+			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class); //This might not do anything outside of Standalone, TODO: check this in the future
+
+			pc->ServerRestartPlayer();
+
+			return ret;
 		}
-		else {
-			pc->SetTeam(EYTeam::YT_TEAM1);
+
+		if (procMapLoad) { //Load the map on the server, needs to run in the main game thread
+			procMapLoad = false;
+
+			std::wstring wMapCommand(mapCommand.begin(), mapCommand.end());
+
+			getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), wMapCommand.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
 		}
 
-		flipTeams = !flipTeams;
+		//In Listen play, calling ClientSetPlayerRestrictions on the local player will result in a stack overflow
+		if (function->GetFullName().find("ClientSetPlayerRestrictions") != std::string::npos && object == (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController) {
+			return nullptr;
+		}
+		//Hacky way to force the HUD and disabled features into ingame mode
+		/*
+		else if (function->GetFullName().find("ClientSetPlayerRestrictions") != std::string::npos) {
+			AYPlayerController_ClientSetPlayerRestrictions_Params* parsedParams = (AYPlayerController_ClientSetPlayerRestrictions_Params*)params;
 
-		std::wstring wLoadoutString(loadoutString.begin(), loadoutString.end());
+			parsedParams->bRestrictAbilities = false;
+			parsedParams->hudState = EYHudState::EHS_HUD;
+			parsedParams->bRestrictChat = false;
+			parsedParams->bRestrictEnergyWheel = false;
+			parsedParams->bRestrictMovements = false;
+			parsedParams->bRestrictOfficerNotifications = false;
+			parsedParams->bRestrictScoringSystem = false;
+			parsedParams->bRestrictSwitchWeapons = false;
+			parsedParams->bRestrictWeapons = false;
+			parsedParams->bSpectate = false;
+			parsedParams->restrictAbility1 = false;
+			parsedParams->restrictAbility2 = false;
+			parsedParams->restrictAbility3 = false;
+			parsedParams->restrictAbility4 = false;
+			parsedParams->restrictCamera = EYCameraRestrictionType::EYCRT_AllowCamera;
+			parsedParams->restrictShortCommands = false;
+			parsedParams->specificMovementRestrictions = FYSpecificMovementControlRestrictions();
+		}
+		*/
+	}
 
-		StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, wLoadoutString.c_str());
+	if (!Globals::AmServer) {
+		if (connectToServer) { //Connect to the server, needs to run in the main game thread
+			connectToServer = false;
 
-		UYShipLoadout* loadoutToApply = nullptr;
+			forceHUD = true;
 
-		for (UYShipLoadout* cmpLoadout : UObject::FindObjects< UYShipLoadout>()) {
-			if (cmpLoadout->GetFullName().find(loadoutString.substr(loadoutString.find_last_of("/") + 1)) != std::string::npos) {
-				loadoutToApply = cmpLoadout;
+			std::wstring wServerIP(serverIP.begin(), serverIP.end());
+
+			std::wstring wServerConnectCommand = L"open ";
+
+			std::wstring wFinalCommand = wServerConnectCommand.append(wServerIP);
+
+			getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), wFinalCommand.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
+		}
+
+		if (launchTutorial) { //Launch the tutorial, needs to run in the main game thread
+			launchTutorial = false;
+
+			getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), L"open S01E00_00_Tutorial_P", (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
+		}
+
+		if (launchSingleplayer) {
+			launchSingleplayer = false;
+
+			std::wstring mapFileNames[10] = { L"MP_Amirani_P", L"MP_DansMap_P", L"MP_Derelict_P", L"MP_Glacier_P", L"MP_Gorge_P", L"MP_Highlands_P", L"MP_Paradise_P", L"MP_Skybridge_P", L"MP_Space01_P", L"MP_Space02_P" };
+
+			std::wstring command = L"open ";
+
+			command = command.append(mapFileNames[map].c_str());
+
+			getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), command.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
+
+			if (numBotsTeamOne > 0 || numBotsTeamTwo > 0) {
+				std::thread t(SetupSingleplayerAIThread, numBotsTeamOne, numBotsTeamTwo, difficulty, singleplayerLoadoutString);
+
+				t.detach();
+			}
+			else {
+				std::thread t(DelaySingleplayerSetupThread, singleplayerLoadoutString);
+
+				t.detach();
 			}
 		}
-
-		pc->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
-		((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class); //This might not do anything outside of Standalone, TODO: check this in the future
-
-		pc->ServerRestartPlayer();
-		
-		return ret;
 	}
-
-	if (procMapLoad) { //Load the map on the server, needs to run in the main game thread
-		procMapLoad = false;
-
-		std::wstring wMapCommand(mapCommand.begin(), mapCommand.end());
-
-		getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), wMapCommand.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
-	}
-
-	//In Listen play, calling ClientSetPlayerRestrictions on the local player will result in a stack overflow
-	if (function->GetFullName().find("ClientSetPlayerRestrictions") != std::string::npos && object == (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController) {
-		return nullptr;
-	}
-	//Hacky way to force the HUD and disabled features into ingame mode
-	/*
-	else if (function->GetFullName().find("ClientSetPlayerRestrictions") != std::string::npos) {
-		AYPlayerController_ClientSetPlayerRestrictions_Params* parsedParams = (AYPlayerController_ClientSetPlayerRestrictions_Params*)params;
-
-		parsedParams->bRestrictAbilities = false;
-		parsedParams->hudState = EYHudState::EHS_HUD;
-		parsedParams->bRestrictChat = false;
-		parsedParams->bRestrictEnergyWheel = false;
-		parsedParams->bRestrictMovements = false;
-		parsedParams->bRestrictOfficerNotifications = false;
-		parsedParams->bRestrictScoringSystem = false;
-		parsedParams->bRestrictSwitchWeapons = false;
-		parsedParams->bRestrictWeapons = false;
-		parsedParams->bSpectate = false;
-		parsedParams->restrictAbility1 = false;
-		parsedParams->restrictAbility2 = false;
-		parsedParams->restrictAbility3 = false;
-		parsedParams->restrictAbility4 = false;
-		parsedParams->restrictCamera = EYCameraRestrictionType::EYCRT_AllowCamera;
-		parsedParams->restrictShortCommands = false;
-		parsedParams->specificMovementRestrictions = FYSpecificMovementControlRestrictions();
-	}
-	*/
-#endif
-
-#ifndef SERVER_BUILD
-	if (connectToServer) { //Connect to the server, needs to run in the main game thread
-		connectToServer = false;
-
-		forceHUD = true;
-
-		std::wstring wServerIP(serverIP.begin(), serverIP.end());
-
-		std::wstring wServerConnectCommand = L"open ";
-
-		std::wstring wFinalCommand = wServerConnectCommand.append(wServerIP);
-
-		getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), wFinalCommand.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
-	}
-
-	if (launchTutorial) { //Launch the tutorial, needs to run in the main game thread
-		launchTutorial = false;
-
-		getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), L"open S01E00_00_Tutorial_P", (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
-	}
-
-	if (launchSingleplayer) {
-		launchSingleplayer = false;
-
-		std::wstring mapFileNames [10] = { L"MP_Amirani_P", L"MP_DansMap_P", L"MP_Derelict_P", L"MP_Glacier_P", L"MP_Gorge_P", L"MP_Highlands_P", L"MP_Paradise_P", L"MP_Skybridge_P", L"MP_Space01_P", L"MP_Space02_P" };
-
-		std::wstring command = L"open ";
-
-		command = command.append(mapFileNames[map].c_str());
-
-		getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), command.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
-
-		if (numBotsTeamOne > 0 || numBotsTeamTwo > 0) {
-			std::thread t(SetupSingleplayerAIThread, numBotsTeamOne, numBotsTeamTwo, difficulty, singleplayerLoadoutString);
-
-			t.detach();
-		}
-		else {
-			std::thread t(DelaySingleplayerSetupThread, singleplayerLoadoutString);
-
-			t.detach();
-		}
-	}
-#endif // !SERVER_BUILD
 
 
 	return origProcessEvent(object, function, params);
@@ -414,7 +417,7 @@ void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
 void Listen() {
 	FURL url = FURL();
 	url.Port = 7777;
-	reinterpret_cast<UObject* (*)(UWorld * world, FURL & inURL)>(global_baseaddress + 0x1CDBB20)(*UWorld::GWorld, url);
+	reinterpret_cast<UObject* (*)(UWorld * world, FURL & inURL)>(Globals::ModuleBase + 0x1CDBB20)(*UWorld::GWorld, url);
 	interceptPostLogin = true;
 }
 
@@ -703,10 +706,6 @@ uint8_t EACErrorMessageHook(__int64 a1, __int64 a2) {
 	Hook ProcessEvent and set the global base address variable
 */
 void InitHooking() {
-	uintptr_t base_address = (uintptr_t)GetModuleHandleA(nullptr);
-
-	global_baseaddress = base_address;
-
 	MH_Initialize();
 
 	//ProcessEvent hookRef = (ProcessEvent)GetVFunction<void(*)(UObject*, class UFunction*, void*)>(UObject::StaticClass(), 0x35);
@@ -715,23 +714,23 @@ void InitHooking() {
 
 	//MH_EnableHook(hookRef);
 
-	MH_CreateHook((void*)(global_baseaddress + 0x29FD910), EACErrorMessageHook, &origEACErrorMessageHook);
+	MH_CreateHook((void*)(Globals::ModuleBase + 0x29FD910), EACErrorMessageHook, &origEACErrorMessageHook);
 
-	MH_EnableHook((void*)(global_baseaddress + 0x29FD910));
+	MH_EnableHook((void*)(Globals::ModuleBase + 0x29FD910));
 
-#ifdef SERVER_BUILD
-	void* hookRef2 = (void*)(global_baseaddress + 0x055B050);
+	if (!Globals::AmServer) {
+		void* hookRef2 = (void*)(Globals::ModuleBase + 0x055B050);
 
-	MH_CreateHook(hookRef2, JustReturnWhatWeWereGoingToReturn, reinterpret_cast<LPVOID*>(&origJustReturn));
+		MH_CreateHook(hookRef2, JustReturnWhatWeWereGoingToReturn, reinterpret_cast<LPVOID*>(&origJustReturn));
 
-	MH_EnableHook(hookRef2);
+		MH_EnableHook(hookRef2);
 
-	void* hookRef3 = (void*)(global_baseaddress + 0x036B2E0);
+		void* hookRef3 = (void*)(Globals::ModuleBase + 0x036B2E0);
 
-	MH_CreateHook(hookRef3, EndMatchHook, reinterpret_cast<LPVOID*>(&origEndMatch));
+		MH_CreateHook(hookRef3, EndMatchHook, reinterpret_cast<LPVOID*>(&origEndMatch));
 
-	MH_EnableHook(hookRef3);
-#endif // !SERVER_BUILD
+		MH_EnableHook(hookRef3);
+	}
 
 	
 }
@@ -897,6 +896,12 @@ void ServerStartCallbacks() {
 */
 void MainThread()
 {
+	Globals::ModuleBase = (uintptr_t)GetModuleHandleA(nullptr);
+
+	if (std::string(GetCommandLineA()).contains("-server")) {
+		Globals::AmServer = true;
+	}
+
 	InitConsole();
 
 	InitSdk();
@@ -904,37 +909,41 @@ void MainThread()
 	InitHooking();
 
 	while (!*UWorld::GWorld) {
+		if (Globals::AmServer) {
+			*(uintptr_t*)(Globals::ModuleBase + 0x3e554b5) = 0x0; // GIsClient
+			*(uintptr_t*)(Globals::ModuleBase + 0x3e554b6) = 0x1; // GIsServer
+		}
 		Sleep(1);
 	}
 
-	InitGameConsole();
+	if (Globals::AmServer) {
+		ServerStartCallbacks();
+	}
 
-#ifdef SERVER_BUILD
-	ServerStartCallbacks();
-#endif // SERVER_BUILD
+	if (!Globals::AmServer) {
+		InitGameConsole();
 
-#ifndef SERVER_BUILD
-	bool init_hook = false;
-	do
-	{
-		if (kiero::init(kiero::RenderType::D3D11) == kiero::Status::Success)
+		bool init_hook = false;
+		do
 		{
-			kiero::bind(8, (void**)&oPresent, hkPresent);
-			kiero::bind(13, (void**)&oResizeBuffers, hkResizeBuffers);
-			init_hook = true;
-		}
-	} while (!init_hook);
+			if (kiero::init(kiero::RenderType::D3D11) == kiero::Status::Success)
+			{
+				kiero::bind(8, (void**)&oPresent, hkPresent);
+				kiero::bind(13, (void**)&oResizeBuffers, hkResizeBuffers);
+				init_hook = true;
+			}
+		} while (!init_hook);
 
-	while (true) {
-		if (GetAsyncKeyState(VK_F7) && !menuToggledThisFrame) {
-			menuToggledThisFrame = true;
-			menuEnabled = !menuEnabled;
-		}
-		else if(!GetAsyncKeyState(VK_F7)){
-			menuToggledThisFrame = false;
+		while (true) {
+			if (GetAsyncKeyState(VK_F7) && !menuToggledThisFrame) {
+				menuToggledThisFrame = true;
+				menuEnabled = !menuEnabled;
+			}
+			else if (!GetAsyncKeyState(VK_F7)) {
+				menuToggledThisFrame = false;
+			}
 		}
 	}
-#endif
 }
 
 /*
@@ -959,9 +968,9 @@ BOOL WINAPI DllMain(HMODULE hMod, DWORD dwReason, LPVOID lpReserved)
 		Init();
 		break;
 	case DLL_PROCESS_DETACH:
-#ifndef SERVER_BUILD
-		kiero::shutdown();
-#endif
+		if (!Globals::AmServer) {
+			kiero::shutdown();
+		}
 		break;
 	}
 	return TRUE;
