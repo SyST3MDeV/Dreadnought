@@ -6,6 +6,8 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <mutex>
+#include <functional>
 
 using namespace CG;
 
@@ -80,7 +82,7 @@ LRESULT __stdcall WndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 	return CallWindowProc(oWndProc, hWnd, uMsg, wParam, lParam);
 }
 
-typedef void* (__thiscall* ProcessEvent)(UObject*, class UFunction*, void*);
+typedef void (__thiscall* ProcessEvent)(UObject*, class UFunction*, void*);
 
 ProcessEvent origProcessEvent = nullptr;
 
@@ -283,14 +285,14 @@ void DelaySingleplayerSetupThread(std::string loadoutString) {
 		- React to game events
 		- Execute code in the main game thread
 */
-void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
+void ProcessEventHook(UObject* object, UFunction* function, void* params) {
 	if (Globals::AmServer) {
-		if (interceptPostLogin && function->GetFullName().find("PostLogin") != std::string::npos) { //Kick off the player controller init sequence
+		if (function->GetFullName().find("PostLogin") != std::string::npos) { //Kick off the player controller init sequence
 			AGameMode_K2_PostLogin_Params* cast_params = ((AGameMode_K2_PostLogin_Params*)params);
 
 			AYPlayerController* pc = (AYPlayerController*)cast_params->NewPlayer;
 
-			void* ret = origProcessEvent(object, function, params);
+			origProcessEvent(object, function, params);
 
 			if (!flipTeams) { //Set every player to the opposite team so our matches are something resembling balanced!
 				pc->SetTeam(EYTeam::YT_TEAM2);
@@ -318,9 +320,10 @@ void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
 
 			pc->ServerRestartPlayer();
 
-			return ret;
+			return;
 		}
 
+		/*
 		if (procMapLoad) { //Load the map on the server, needs to run in the main game thread
 			procMapLoad = false;
 
@@ -328,11 +331,14 @@ void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
 
 			getLastOfType<UKismetSystemLibrary>()->STATIC_ExecuteConsoleCommand((*UWorld::GWorld), wMapCommand.c_str(), (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController);
 		}
+		*/
 
 		//In Listen play, calling ClientSetPlayerRestrictions on the local player will result in a stack overflow
+		/*
 		if (function->GetFullName().find("ClientSetPlayerRestrictions") != std::string::npos && object == (*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController) {
 			return nullptr;
 		}
+		*/
 		//Hacky way to force the HUD and disabled features into ingame mode
 		/*
 		else if (function->GetFullName().find("ClientSetPlayerRestrictions") != std::string::npos) {
@@ -359,6 +365,7 @@ void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
 		*/
 	}
 
+	/*
 	if (!Globals::AmServer) {
 		if (connectToServer) { //Connect to the server, needs to run in the main game thread
 			connectToServer = false;
@@ -403,9 +410,10 @@ void* ProcessEventHook(UObject* object, UFunction* function, void* params) {
 			}
 		}
 	}
+	*/
 
 
-	return origProcessEvent(object, function, params);
+	origProcessEvent(object, function, params);
 }
 
 /*
@@ -702,37 +710,107 @@ uint8_t EACErrorMessageHook(__int64 a1, __int64 a2) {
 	return 1; // 1 = Success here
 }
 
+void* OrigUGameEngineTick = nullptr;
+
+std::mutex ProcOnMainThreadMutex{};
+
+std::vector<std::function<void()>> FunctionsToProcOnMainThread{};
+
+void UGameEngineTick(UGameEngine* GameEngine, float DeltaTime, bool CanEverRender) {
+	reinterpret_cast<void(*)(UGameEngine*, float, bool)>(OrigUGameEngineTick)(GameEngine, DeltaTime, CanEverRender);
+
+	{
+		std::scoped_lock t(ProcOnMainThreadMutex);
+
+		for (const auto& func : FunctionsToProcOnMainThread) {
+			func();
+		}
+
+		FunctionsToProcOnMainThread.clear();
+	}
+
+	return;
+}
+
+void ProcInMainThread(std::function<void()> Func) {
+	std::scoped_lock t(ProcOnMainThreadMutex);
+
+	FunctionsToProcOnMainThread.push_back(Func);
+
+	return;
+}
+
+void ServerParticleCrash(void* a1) {
+	return;
+}
+
+void* origVehicleSkipUpdateCheck1 = nullptr;
+void* origVehicleSkipUpdateCheck2 = nullptr;
+
+void VehicleSkipUpdateCheck1Hook(uintptr_t a1) {
+	*(uint8_t*)(a1 + 0x488) = 0x1;
+
+	std::cout << "=============== CHECK 1 ===============" << std::endl;
+
+	reinterpret_cast<void(*)(uintptr_t)>(origVehicleSkipUpdateCheck1)(a1);
+	reinterpret_cast<void(*)(__int64 a1, float a2)>(origVehicleSkipUpdateCheck2)(a1, 1.0f / 30.0f);
+}
+
+
+
+void VehicleSkipUpdateCheck2Hook(__int64 a1, float a2) {
+	*(uint8_t*)(a1 + 0x488) = 0x1;
+	
+	std::cout << "=============== CHECK 2 ===============" << std::endl;
+
+	reinterpret_cast<void(*)(__int64 a1, float a2)>(origVehicleSkipUpdateCheck2)(a1, a2);
+}
+
 /*
 	Hook ProcessEvent and set the global base address variable
 */
 void InitHooking() {
 	MH_Initialize();
 
-	//ProcessEvent hookRef = (ProcessEvent)GetVFunction<void(*)(UObject*, class UFunction*, void*)>(UObject::StaticClass(), 0x35);
+	ProcessEvent hookRef = (ProcessEvent)(Globals::ModuleBase + 0xD5B180);
 
-	//MH_CreateHook(hookRef, ProcessEventHook, reinterpret_cast<LPVOID*>(&origProcessEvent));
+	MH_CreateHook(hookRef, ProcessEventHook, reinterpret_cast<LPVOID*>(&origProcessEvent));
 
-	//MH_EnableHook(hookRef);
+	MH_EnableHook(hookRef);
 
 	MH_CreateHook((void*)(Globals::ModuleBase + 0x29FD910), EACErrorMessageHook, &origEACErrorMessageHook);
 
 	MH_EnableHook((void*)(Globals::ModuleBase + 0x29FD910));
 
-	if (!Globals::AmServer) {
+	MH_CreateHook((void*)(Globals::ModuleBase + 0x1958C90), UGameEngineTick, &OrigUGameEngineTick);
+
+	MH_EnableHook((void*)(Globals::ModuleBase + 0x1958C90));
+
+	if (Globals::AmServer) {
+		MH_CreateHook((void*)(Globals::ModuleBase + 0x1A841C0), EACErrorMessageHook, &origEACErrorMessageHook);
+
+		MH_EnableHook((void*)(Globals::ModuleBase + 0x1A841C0));
+
+		MH_CreateHook((void*)(Globals::ModuleBase + 0x5C8C00), VehicleSkipUpdateCheck1Hook, &origVehicleSkipUpdateCheck1);
+
+		MH_EnableHook((void*)(Globals::ModuleBase + 0x5C8C00));
+
+		MH_CreateHook((void*)(Globals::ModuleBase + 0x5C8DC0), VehicleSkipUpdateCheck1Hook, &origVehicleSkipUpdateCheck2);
+
+		MH_EnableHook((void*)(Globals::ModuleBase + 0x5C8DC0));
+
 		void* hookRef2 = (void*)(Globals::ModuleBase + 0x055B050);
 
 		MH_CreateHook(hookRef2, JustReturnWhatWeWereGoingToReturn, reinterpret_cast<LPVOID*>(&origJustReturn));
 
-		MH_EnableHook(hookRef2);
+		//MH_EnableHook(hookRef2);
 
 		void* hookRef3 = (void*)(Globals::ModuleBase + 0x036B2E0);
 
 		MH_CreateHook(hookRef3, EndMatchHook, reinterpret_cast<LPVOID*>(&origEndMatch));
 
-		MH_EnableHook(hookRef3);
+		//MH_EnableHook(hookRef3);
 	}
-
-	
 }
 
 /*
@@ -765,6 +843,12 @@ int serverBotDifficulty = 0;
 	Loads server configuration from cfg.txt in the Win64 folder
 */
 void LoadConfiguration() {
+	mapCommand = "open DansMap_P";
+	loadoutString = "/Game/Generic/Loadouts/Precast/T5/VH_AssaultLight_PrecastLoadout_T5_BP";
+	numBotsTeamOne = 0;
+	numBotsTeamTwo = 0;
+	serverBotDifficulty = 2;
+	/*
 	std::ifstream cfgFile("cfg.txt");
 
 	std::getline(cfgFile, mapCommand);
@@ -789,6 +873,7 @@ void LoadConfiguration() {
 	serverBotDifficulty = std::stoi(procLine);
 
 	procLine = "";
+	*/
 }
 
 /*
@@ -869,9 +954,12 @@ void InitRespawnThread() {
 */
 void ServerStartCallbacks() {
 	LoadConfiguration();
-
-	procMapLoad = true;
-
+	
+	ProcInMainThread([]() {
+		FString URL = L"/Game/Maps/MP/DansMap/MP_DansMap_P?Listen";
+		reinterpret_cast<void(*)(UWorld*, FString*, bool, bool)>(Globals::ModuleBase + 0x1CE2E40)((*UWorld::GWorld), &URL, true, false);
+	});
+	/*
 	Sleep(20 * 1000);
 
 	if (serverNumBotsTeamOne > 0 || serverNumBotsTeamTwo > 0) {
@@ -889,6 +977,7 @@ void ServerStartCallbacks() {
 	Listen();
 
 	InitRespawnThread();
+	*/
 }
 
 /*
