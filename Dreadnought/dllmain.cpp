@@ -489,7 +489,7 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 		Main menu code begins here
 	*/
 	if (menuEnabled) {
-		ImGui::Begin("Dreadnought (F1 to show/hide)", &menuEnabled, ImGuiWindowFlags_AlwaysAutoResize);
+		ImGui::Begin("Dreadnought (F7 to show/hide)", &menuEnabled, ImGuiWindowFlags_AlwaysAutoResize);
 
 		if (ImGui::BeginTabBar("MenuSelect")) {
 			if (ImGui::BeginTabItem("Singleplayer")) {
@@ -750,8 +750,6 @@ void* origVehicleSkipUpdateCheck2 = nullptr;
 void VehicleSkipUpdateCheck1Hook(uintptr_t a1) {
 	*(uint8_t*)(a1 + 0x488) = 0x1;
 
-	std::cout << "=============== CHECK 1 ===============" << std::endl;
-
 	reinterpret_cast<void(*)(uintptr_t)>(origVehicleSkipUpdateCheck1)(a1);
 	reinterpret_cast<void(*)(__int64 a1, float a2)>(origVehicleSkipUpdateCheck2)(a1, 1.0f / 30.0f);
 }
@@ -760,8 +758,6 @@ void VehicleSkipUpdateCheck1Hook(uintptr_t a1) {
 
 void VehicleSkipUpdateCheck2Hook(__int64 a1, float a2) {
 	*(uint8_t*)(a1 + 0x488) = 0x1;
-	
-	std::cout << "=============== CHECK 2 ===============" << std::endl;
 
 	reinterpret_cast<void(*)(__int64 a1, float a2)>(origVehicleSkipUpdateCheck2)(a1, a2);
 }
