@@ -288,6 +288,8 @@ void DelaySingleplayerSetupThread(std::string loadoutString) {
 void ProcessEventHook(UObject* object, UFunction* function, void* params) {
 	if (Globals::AmServer) {
 		if (function->GetFullName().find("PostLogin") != std::string::npos) { //Kick off the player controller init sequence
+			getLastOfType< UYHavocDataManager>()->Initialize((*UWorld::GWorld));
+
 			AGameMode_K2_PostLogin_Params* cast_params = ((AGameMode_K2_PostLogin_Params*)params);
 
 			AYPlayerController* pc = (AYPlayerController*)cast_params->NewPlayer;
@@ -716,6 +718,62 @@ std::mutex ProcOnMainThreadMutex{};
 
 std::vector<std::function<void()>> FunctionsToProcOnMainThread{};
 
+struct FActorSpawnParameters
+{
+	/* A name to assign as the Name of the Actor being spawned. If no value is specified, the name of the spawned Actor will be automatically generated using the form [Class]_[Number]. */
+	FName Name;
+
+	/* An Actor to use as a template when spawning the new Actor. The spawned Actor will be initialized using the property values of the template Actor. If left NULL the class default object (CDO) will be used to initialize the spawned Actor. */
+	AActor* Template;
+
+	/* The Actor that spawned this Actor. (Can be left as NULL). */
+	AActor* Owner;
+
+	/* The APawn that is responsible for damage done by the spawned Actor. (Can be left as NULL). */
+	APawn* Instigator;
+
+	/* The ULevel to spawn the Actor in, i.e. the Outer of the Actor. If left as NULL the Outer of the Owner is used. If the Owner is NULL the persistent level is used. */
+	class	ULevel* OverrideLevel;
+
+	/** Method for resolving collisions at the spawn point. Undefined means no override, use the actor's setting. */
+	ESpawnActorCollisionHandlingMethod SpawnCollisionHandlingOverride;
+
+	/* Is the actor remotely owned. This should only be set true by the package map when it is creating an actor on a client that was replicated from the server. */
+	uint16_t	bRemoteOwned : 1;
+
+	/* Determines whether spawning will not fail if certain conditions are not met. If true, spawning will not fail because the class being spawned is `bStatic=true` or because the class of the template Actor is not the same as the class of the Actor being spawned. */
+	uint16_t	bNoFail : 1;
+
+	/* Determines whether the construction script will be run. If true, the construction script will not be run on the spawned Actor. Only applicable if the Actor is being spawned from a Blueprint. */
+	uint16_t	bDeferConstruction : 1;
+
+	/* Determines whether or not the actor may be spawned when running a construction script. If true spawning will fail if a construction script is being run. */
+	uint16_t	bAllowDuringConstructionScript : 1;
+
+	/* Flags used to describe the spawned actor/object instance. */
+	ObjectFlags ObjectFlags;
+
+	FActorSpawnParameters() {
+		Name = FName();
+		Template = nullptr;
+		Owner = nullptr;
+		Instigator = nullptr;
+		OverrideLevel = nullptr;
+		SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		bRemoteOwned = false;
+		bNoFail = true;
+		bDeferConstruction = false;
+		bAllowDuringConstructionScript = true;
+		ObjectFlags = ObjectFlags::None;
+	}
+};
+
+AActor* UWorldSpawnActor(UClass* ActorClass, FVector* SpawnLocation, FRotator* SpawnRotation) {
+	return reinterpret_cast<AActor* (*)(UWorld*, UClass*, FVector*, FRotator*, FActorSpawnParameters*)>(Globals::ModuleBase + 0x1A0C8D0)(*UWorld::GWorld, ActorClass, SpawnLocation, SpawnRotation, new FActorSpawnParameters());
+}
+
+bool OverrideGetActor = false;
+
 void UGameEngineTick(UGameEngine* GameEngine, float DeltaTime, bool CanEverRender) {
 	reinterpret_cast<void(*)(UGameEngine*, float, bool)>(OrigUGameEngineTick)(GameEngine, DeltaTime, CanEverRender);
 
@@ -727,6 +785,15 @@ void UGameEngineTick(UGameEngine* GameEngine, float DeltaTime, bool CanEverRende
 		}
 
 		FunctionsToProcOnMainThread.clear();
+	}
+
+	if (Globals::AmServer) {
+		if (GetAsyncKeyState(VK_F8)) {
+
+			while (GetAsyncKeyState(VK_F8)) {
+
+			}
+		}
 	}
 
 	return;
@@ -753,8 +820,6 @@ void VehicleSkipUpdateCheck1Hook(uintptr_t a1) {
 	reinterpret_cast<void(*)(uintptr_t)>(origVehicleSkipUpdateCheck1)(a1);
 	reinterpret_cast<void(*)(__int64 a1, float a2)>(origVehicleSkipUpdateCheck2)(a1, 1.0f / 30.0f);
 }
-
-
 
 void VehicleSkipUpdateCheck2Hook(__int64 a1, float a2) {
 	*(uint8_t*)(a1 + 0x488) = 0x1;
@@ -799,13 +864,13 @@ void InitHooking() {
 
 		MH_CreateHook(hookRef2, JustReturnWhatWeWereGoingToReturn, reinterpret_cast<LPVOID*>(&origJustReturn));
 
-		//MH_EnableHook(hookRef2);
+		MH_EnableHook(hookRef2);
 
 		void* hookRef3 = (void*)(Globals::ModuleBase + 0x036B2E0);
 
 		MH_CreateHook(hookRef3, EndMatchHook, reinterpret_cast<LPVOID*>(&origEndMatch));
 
-		//MH_EnableHook(hookRef3);
+		MH_EnableHook(hookRef3);
 	}
 }
 
