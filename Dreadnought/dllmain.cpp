@@ -288,8 +288,6 @@ void DelaySingleplayerSetupThread(std::string loadoutString) {
 void ProcessEventHook(UObject* object, UFunction* function, void* params) {
 	if (Globals::AmServer) {
 		if (function->GetFullName().find("PostLogin") != std::string::npos) { //Kick off the player controller init sequence
-			getLastOfType< UYHavocDataManager>()->Initialize((*UWorld::GWorld));
-
 			AGameMode_K2_PostLogin_Params* cast_params = ((AGameMode_K2_PostLogin_Params*)params);
 
 			AYPlayerController* pc = (AYPlayerController*)cast_params->NewPlayer;
@@ -317,8 +315,32 @@ void ProcessEventHook(UObject* object, UFunction* function, void* params) {
 				}
 			}
 
-			pc->GetLoadoutManager()->m_activeLoadout = loadoutToApply;
+			FYLoadoutEntry loadout{};
+
+			loadout.m_loadouts._count = 5;
+			loadout.m_loadouts._data = (UYShipLoadout**)FMemoryMalloc(sizeof(UYShipLoadout*) * 5);
+			loadout.m_loadouts._max = 5;
+
+			loadout.m_loadouts[0] = (UYShipLoadout*)loadoutToApply;
+			loadout.m_loadouts[1] = (UYShipLoadout*)loadoutToApply;
+			loadout.m_loadouts[2] = (UYShipLoadout*)loadoutToApply;
+			loadout.m_loadouts[3] = (UYShipLoadout*)loadoutToApply;
+			loadout.m_loadouts[4] = (UYShipLoadout*)loadoutToApply;
+
+			pc->GetLoadoutManager()->m_loadoutEntries._data = (FYLoadoutEntry*)FMemoryMalloc(sizeof(FYLoadoutEntry) * 2);
+			pc->GetLoadoutManager()->m_loadoutEntries._count = 2;
+			pc->GetLoadoutManager()->m_loadoutEntries._max = 2;
+
+			pc->GetLoadoutManager()->m_loadoutEntries._data[0] = loadout;
+			pc->GetLoadoutManager()->m_loadoutEntries._data[1] = loadout;
+
+			pc->GetLoadoutManager()->m_activeLoadout = loadout.m_loadouts[0];
 			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class); //This might not do anything outside of Standalone, TODO: check this in the future
+			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+
 
 			pc->ServerRestartPlayer();
 
@@ -787,7 +809,7 @@ void UGameEngineTick(UGameEngine* GameEngine, float DeltaTime, bool CanEverRende
 		FunctionsToProcOnMainThread.clear();
 	}
 
-	if (Globals::AmServer) {
+	if (!Globals::AmServer) {
 		if (GetAsyncKeyState(VK_F8)) {
 
 			while (GetAsyncKeyState(VK_F8)) {
@@ -827,6 +849,30 @@ void VehicleSkipUpdateCheck2Hook(__int64 a1, float a2) {
 	reinterpret_cast<void(*)(__int64 a1, float a2)>(origVehicleSkipUpdateCheck2)(a1, a2);
 }
 
+void* OrigGetAuthToken = nullptr;
+
+FString* GetAuthTokenHook(FString* AuthToken) {
+	*(uint8_t*)(Globals::ModuleBase + 0x40EC940) = 0x6;
+
+	AuthToken->_data = (wchar_t*)FMemoryMalloc(sizeof(L"0w0"));
+	AuthToken->_data[0] = L'0';
+	AuthToken->_data[1] = L'w';
+	AuthToken->_data[2] = L'0';
+	AuthToken->_data[3] = L'\0';
+	AuthToken->_count = 3;
+	AuthToken->_max = 3;
+	return AuthToken;
+}
+
+void* OrigValidateFirmamentCert = nullptr;
+
+char ValidateFirmamentCertHook(void* a1, void* a2) {
+	std::cout << "Bypassed Firmament Cert!" << std::endl;
+	return 1;
+}
+
+//4201D0
+
 /*
 	Hook ProcessEvent and set the global base address variable
 */
@@ -846,6 +892,16 @@ void InitHooking() {
 	MH_CreateHook((void*)(Globals::ModuleBase + 0x1958C90), UGameEngineTick, &OrigUGameEngineTick);
 
 	MH_EnableHook((void*)(Globals::ModuleBase + 0x1958C90));
+
+	/*
+	MH_CreateHook((void*)(Globals::ModuleBase + 0x4201D0), GetAuthTokenHook, &OrigGetAuthToken);
+
+	MH_EnableHook((void*)(Globals::ModuleBase + 0x4201D0));
+
+	MH_CreateHook((void*)(Globals::ModuleBase + 0x2A4D590), ValidateFirmamentCertHook, &OrigValidateFirmamentCert);
+
+	MH_EnableHook((void*)(Globals::ModuleBase + 0x2A4D590));
+	*/
 
 	if (Globals::AmServer) {
 		MH_CreateHook((void*)(Globals::ModuleBase + 0x1A841C0), EACErrorMessageHook, &origEACErrorMessageHook);
