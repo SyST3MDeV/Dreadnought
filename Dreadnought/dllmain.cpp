@@ -232,8 +232,8 @@ void SetupMultiplayerAI(int numBotsTeamOne, int numBotsTeamTwo, int difficulty) 
 		break;
 	}
 
-	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetCombatManager()->m_NPCSet = getLastOfType< UYNPCPawnData>();
-	((AYPlayerController*)(*UWorld::GWorld)->OwningGameInstance->LocalPlayers[0]->PlayerController)->GetCombatManager()->m_isNPCSetLoaded = true;
+	((AYPlayerController*)(*UWorld::GWorld)->NetDriver->ClientConnections[0]->PlayerController)->GetCombatManager()->m_NPCSet = getLastOfType< UYNPCPawnData>();
+	((AYPlayerController*)(*UWorld::GWorld)->NetDriver->ClientConnections[0]->PlayerController)->GetCombatManager()->m_isNPCSetLoaded = true;
 
 	UYNPCPawnData* pawnData = getLastOfType< UYNPCPawnData>();
 
@@ -256,7 +256,7 @@ void SetupMultiplayerAI(int numBotsTeamOne, int numBotsTeamTwo, int difficulty) 
 
 	((AYGameMode_Multiplayer*)(*UWorld::GWorld)->AuthorityGameMode)->m_enableSpawnAI = true;
 
-	Sleep(30 * 1000);
+	//Sleep(30 * 1000);
 }
 
 int numPlayersConnected = 0;
@@ -278,6 +278,19 @@ void DelaySingleplayerSetupThread(std::string loadoutString) {
 
 	CompleteSingleplayerMatchSetup(loadoutString);
 }
+
+FString MakeFMemoryFString(const wchar_t* StrContents) {
+	FString ret{};
+
+	ret._data = (wchar_t*)FMemoryMalloc(sizeof(StrContents));
+	memcpy(ret._data, StrContents, sizeof(StrContents));
+	ret._count = wcslen(StrContents);
+	ret._max = wcslen(StrContents);
+
+	return ret;
+}
+
+UYShipLoadout* THELOADOUT = nullptr;
 
 /*
 	ProcessEvent is the function that UFunctions pass through to be executed.
@@ -303,6 +316,7 @@ void ProcessEventHook(UObject* object, UFunction* function, void* params) {
 
 			flipTeams = !flipTeams;
 
+			/*
 			std::wstring wLoadoutString(loadoutString.begin(), loadoutString.end());
 
 			StaticLoadClass(UYShipLoadout::StaticClass(), nullptr, wLoadoutString.c_str());
@@ -314,32 +328,55 @@ void ProcessEventHook(UObject* object, UFunction* function, void* params) {
 					loadoutToApply = cmpLoadout;
 				}
 			}
+			*/
 
-			FYLoadoutEntry loadout{};
+			UYShipLoadout* Loadout = (UYShipLoadout*)getLastOfType<UGameplayStatics>()->STATIC_SpawnObject(UYShipLoadout::StaticClass(), pc);
 
-			loadout.m_loadouts._count = 5;
-			loadout.m_loadouts._data = (UYShipLoadout**)FMemoryMalloc(sizeof(UYShipLoadout*) * 5);
-			loadout.m_loadouts._max = 5;
+			Loadout->m_isCustom = true;
+			Loadout->m_name = MakeFMemoryFString(L"0w0");
+			
+			Loadout->m_shipClass = EYShipClass::YSC_DREADNOUGHT_HEAVY;
+			Loadout->m_precastLoadoutID = 33489301;
+			
+			Loadout->m_primaryWeaponClass = (UClass*)StaticLoadClass(UClass::StaticClass(), nullptr, L"/Game/Generic/Weapons/Dreadnought/Heavy/BP/T5/WP_DreadnoughtHPri01_weapon01_T5_BP.WP_DreadnoughtHPri01_weapon01_T5_BP_C");
+			Loadout->m_secondaryWeaponClass = (UClass*)StaticLoadClass(UClass::StaticClass(), nullptr, L"/Game/Generic/Weapons/Dreadnought/Heavy/BP/T5/WP_DreadnoughtHPri01_weapon01_T5_BP.WP_DreadnoughtHPri01_weapon01_T5_BP_C");
+			
+			if (Loadout->m_primaryWeaponClass) {
+				std::cout << Loadout->m_primaryWeaponClass->GetFullName() << std::endl;
+			}
+			else {
+				std::cout << "PRIMARY WEP DIDN'T LOAD" << std::endl;
+			}
 
-			loadout.m_loadouts[0] = (UYShipLoadout*)loadoutToApply;
-			loadout.m_loadouts[1] = (UYShipLoadout*)loadoutToApply;
-			loadout.m_loadouts[2] = (UYShipLoadout*)loadoutToApply;
-			loadout.m_loadouts[3] = (UYShipLoadout*)loadoutToApply;
-			loadout.m_loadouts[4] = (UYShipLoadout*)loadoutToApply;
 
-			pc->GetLoadoutManager()->m_loadoutEntries._data = (FYLoadoutEntry*)FMemoryMalloc(sizeof(FYLoadoutEntry) * 2);
-			pc->GetLoadoutManager()->m_loadoutEntries._count = 2;
-			pc->GetLoadoutManager()->m_loadoutEntries._max = 2;
+			Loadout->m_abilities._data = (UClass**)FMemoryMalloc(sizeof(uintptr_t) * 4);
+			Loadout->m_abilities._data[0] = (UClass*)StaticLoadClass(UClass::StaticClass(), nullptr, L"/Game/Generic/Abilities/Dreadnought/Sec_TorpedoH_Dmg/AB_DN_Sec_TrpH_Dmg_Ability_BP.AB_DN_Sec_TrpH_Dmg_Ability_BP_C");//
+			Loadout->m_abilities._data[1] = (UClass*)StaticLoadClass(UClass::StaticClass(), nullptr, L"/Game/Generic/Abilities/Dreadnought/Sec_TorpedoH_Dmg/AB_DN_Sec_TrpH_Dmg_Ability_BP.AB_DN_Sec_TrpH_Dmg_Ability_BP_C");
+			Loadout->m_abilities._data[2] = (UClass*)StaticLoadClass(UClass::StaticClass(), nullptr, L"/Game/Generic/Abilities/Dreadnought/Sec_TorpedoH_Dmg/AB_DN_Sec_TrpH_Dmg_Ability_BP.AB_DN_Sec_TrpH_Dmg_Ability_BP_C");
+			Loadout->m_abilities._data[3] = (UClass*)StaticLoadClass(UClass::StaticClass(), nullptr, L"/Game/Generic/Abilities/Dreadnought/Sec_TorpedoH_Dmg/AB_DN_Sec_TrpH_Dmg_Ability_BP.AB_DN_Sec_TrpH_Dmg_Ability_BP_C");
+			Loadout->m_abilities._count = 4;
+			Loadout->m_abilities._max = 4;
 
-			pc->GetLoadoutManager()->m_loadoutEntries._data[0] = loadout;
-			pc->GetLoadoutManager()->m_loadoutEntries._data[1] = loadout;
+			if (Loadout->m_abilities._data[0]) {
+				std::cout << Loadout->m_primaryWeaponClass->GetFullName() << std::endl;
+			}
+			else {
+				std::cout << "PRIMARY WEP DIDN'T LOAD" << std::endl;
+			}
 
-			pc->GetLoadoutManager()->m_activeLoadout = loadout.m_loadouts[0];
-			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class); //This might not do anything outside of Standalone, TODO: check this in the future
-			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
-			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
-			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
-			((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class);
+			Loadout->m_abilitiesId._data = (int*)FMemoryMalloc(sizeof(int) * 4);
+			Loadout->m_abilitiesId._data[0] = 83820674;
+			Loadout->m_abilitiesId._data[1] = 83820674;
+			Loadout->m_abilitiesId._data[2] = 83820674;
+			Loadout->m_abilitiesId._data[3] = 83820674;
+			Loadout->m_abilitiesId._count = 4;
+			Loadout->m_abilitiesId._max = 4;
+
+			THELOADOUT = Loadout;
+			pc->GetLoadoutManager()->m_activeLoadout = Loadout;
+			((AYPlayerController*)pc)->ReplaceShipWithActiveLoadout();
+			
+			//((AYPlayerController*)pc)->AddAndActiveLoadoutFromBlueprint(loadoutToApply->Class); //This might not do anything outside of Standalone, TODO: check this in the future
 
 
 			pc->ServerRestartPlayer();
@@ -809,7 +846,7 @@ void UGameEngineTick(UGameEngine* GameEngine, float DeltaTime, bool CanEverRende
 		FunctionsToProcOnMainThread.clear();
 	}
 
-	if (!Globals::AmServer) {
+	if (Globals::AmServer) {
 		if (GetAsyncKeyState(VK_F8)) {
 
 			while (GetAsyncKeyState(VK_F8)) {
@@ -871,7 +908,16 @@ char ValidateFirmamentCertHook(void* a1, void* a2) {
 	return 1;
 }
 
-//4201D0
+void* OrigGetShipById = nullptr;
+
+UYShipLoadout* GetShipByIdHook(void* a1, void* a2, char a3) {
+	if (THELOADOUT) {
+		std::cout << "Overrode loadout!" << std::endl;
+		return THELOADOUT;
+	}
+
+	return reinterpret_cast<UYShipLoadout * (*)(void*, void*, char)>(OrigGetShipById)(a1, a2, a3);
+}
 
 /*
 	Hook ProcessEvent and set the global base address variable
@@ -893,6 +939,8 @@ void InitHooking() {
 
 	MH_EnableHook((void*)(Globals::ModuleBase + 0x1958C90));
 
+	//3404E0
+
 	/*
 	MH_CreateHook((void*)(Globals::ModuleBase + 0x4201D0), GetAuthTokenHook, &OrigGetAuthToken);
 
@@ -904,6 +952,10 @@ void InitHooking() {
 	*/
 
 	if (Globals::AmServer) {
+		MH_CreateHook((void*)(Globals::ModuleBase + 0x340340), GetShipByIdHook, &OrigGetShipById);
+
+		MH_EnableHook((void*)(Globals::ModuleBase + 0x340340));
+
 		MH_CreateHook((void*)(Globals::ModuleBase + 0x1A841C0), EACErrorMessageHook, &origEACErrorMessageHook);
 
 		MH_EnableHook((void*)(Globals::ModuleBase + 0x1A841C0));
@@ -912,7 +964,7 @@ void InitHooking() {
 
 		MH_EnableHook((void*)(Globals::ModuleBase + 0x5C8C00));
 
-		MH_CreateHook((void*)(Globals::ModuleBase + 0x5C8DC0), VehicleSkipUpdateCheck1Hook, &origVehicleSkipUpdateCheck2);
+		MH_CreateHook((void*)(Globals::ModuleBase + 0x5C8DC0), VehicleSkipUpdateCheck1Hook, &origVehicleSkipUpdateCheck2); // Originally a typo but it's the most unstable part of this codebase so if it works I'm not touching it
 
 		MH_EnableHook((void*)(Globals::ModuleBase + 0x5C8DC0));
 
@@ -952,8 +1004,8 @@ void InitConsole() {
 	freopen_s(&fDummy, "CONOUT$", "w", stdout);
 }
 
-int serverNumBotsTeamOne = 0;
-int serverNumBotsTeamTwo = 0;
+int serverNumBotsTeamOne = 5;
+int serverNumBotsTeamTwo = 4;
 int serverBotDifficulty = 0;
 
 /*
@@ -962,8 +1014,8 @@ int serverBotDifficulty = 0;
 void LoadConfiguration() {
 	mapCommand = "open DansMap_P";
 	loadoutString = "/Game/Generic/Loadouts/Precast/T5/VH_AssaultLight_PrecastLoadout_T5_BP";
-	numBotsTeamOne = 0;
-	numBotsTeamTwo = 0;
+	numBotsTeamOne = 5;
+	numBotsTeamTwo = 4;
 	serverBotDifficulty = 2;
 	/*
 	std::ifstream cfgFile("cfg.txt");
@@ -1076,25 +1128,37 @@ void ServerStartCallbacks() {
 		FString URL = L"/Game/Maps/MP/DansMap/MP_DansMap_P?Listen";
 		reinterpret_cast<void(*)(UWorld*, FString*, bool, bool)>(Globals::ModuleBase + 0x1CE2E40)((*UWorld::GWorld), &URL, true, false);
 	});
-	/*
-	Sleep(20 * 1000);
+
+	Sleep(5 * 1000);
+	//Sleep(20 * 1000);
+
+	while (!*UWorld::GWorld) {
+		Sleep(1);
+	}
+
+	Sleep(5 * 1000);
+
+	while (!(*UWorld::GWorld)->NetDriver || (*UWorld::GWorld)->NetDriver->ClientConnections.Count() == 0 || !(*UWorld::GWorld)->NetDriver->ClientConnections[0]->PlayerController) {
+		Sleep(1);
+	}
+
+	Sleep(5 * 1000);
 
 	if (serverNumBotsTeamOne > 0 || serverNumBotsTeamTwo > 0) {
 		SetupMultiplayerAI(serverNumBotsTeamOne, serverNumBotsTeamTwo, serverBotDifficulty);
 	}
 
-	ForceSpawnLocalPlayer();
+	//ForceSpawnLocalPlayer();
 
 	ForceStartMatch();
 
-	Sleep(15 * 1000);
+	//Sleep(15 * 1000);
 
-	InitDesyncFix();
+	//InitDesyncFix();
 
-	Listen();
+	//Listen();
 
-	InitRespawnThread();
-	*/
+	//InitRespawnThread();
 }
 
 /*
